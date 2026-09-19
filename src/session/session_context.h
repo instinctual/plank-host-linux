@@ -53,6 +53,7 @@ namespace plank::session {
     std::string mode_1;
     std::string mode_2;
     uid_t account_uid {};
+    int primary_output {-1};  ///< Optional primary connector side in left-to-right virtual order.
   };
 
   struct runtime_display_state_t {

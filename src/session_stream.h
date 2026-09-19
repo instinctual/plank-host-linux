@@ -34,6 +34,7 @@ namespace session_stream {
     std::string host_layout;  ///< Exact PLANK host display layout required by the bookmark.
     std::string virtual_mode_1;  ///< Exact qualified mode required for virtual output 1.
     std::string virtual_mode_2;  ///< Exact qualified mode required for virtual output 2.
+    int primary_output {-1};  ///< Optional primary connector side in left-to-right virtual order.
     std::string capture_source;  ///< Exact PLANK capture source requested by the client.
     std::string encoder_backend;  ///< Exact PLANK encoder backend requested by the client.
     std::string encoding_mode;  ///< Exact PLANK codec/depth/chroma/encoder mode requested by the client.

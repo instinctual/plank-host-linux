@@ -583,7 +583,11 @@ namespace nvhttp {
       outputs.size() == 1 ? "single" :
       outputs.size() == 2 ? "dual-horizontal" : "unhealthy";
     if (result.virtual_layout) {
-      for (const auto &output : outputs) {
+      auto left_to_right = outputs;
+      std::sort(left_to_right.begin(), left_to_right.end(), [](const auto &left, const auto &right) {
+        return std::tie(left.x, left.y, left.id) < std::tie(right.x, right.y, right.id);
+      });
+      for (const auto &output : left_to_right) {
         result.virtual_modes.push_back(
           std::format("{}x{}", output.width, output.height)
         );
@@ -699,6 +703,13 @@ namespace nvhttp {
     });
 
     const auto live_layout = live_display_layout(outputs);
+    if (!plank::topology::valid_virtual_primary_binding(
+          session.host_layout, live_layout.startup_kind, session.primary_output,
+          session.plank_feature_flags)) {
+      tree.put("root.<xmlattr>.status_code", 400);
+      tree.put("root.<xmlattr>.status_message", "Invalid or unnegotiated virtual primary binding");
+      return false;
+    }
     if (!plank::topology::layout_allowed_by_startup_layout(
           session.host_layout, live_layout.startup_kind
         )) {
@@ -729,11 +740,24 @@ namespace nvhttp {
       tree.put("root.<xmlattr>.status_message", "Invalid PLANK host-layout binding");
       return false;
     }
-    if (validation == plank::topology::layout_error::mismatch) {
+    const bool primary_mismatch = session.primary_output >= 0 &&
+      (static_cast<std::size_t>(session.primary_output) >= ordered_outputs.size() ||
+       !ordered_outputs[session.primary_output].get().primary);
+    // Flame chooses the first virtual connector even when GNOME marks a
+    // different output primary. Bind DP-0 to the requested side as well.
+    const std::string_view selected_connector = session.primary_output >= 0 &&
+      static_cast<std::size_t>(session.primary_output) < ordered_outputs.size() ?
+      std::string_view {ordered_outputs[session.primary_output].get().id} : std::string_view {};
+    const bool connector_mismatch = !plank::topology::virtual_primary_connector_matches(
+      live_layout.startup_kind, session.primary_output, ordered_outputs.size(), selected_connector
+    );
+    if (validation == plank::topology::layout_error::mismatch ||
+        (validation == plank::topology::layout_error::none &&
+         (primary_mismatch || connector_mismatch))) {
       const auto transition = plank::session::request_display_transition({
         plank::session::display_request_t::action_t::acquire,
         session.host_layout, session.virtual_mode_1, session.virtual_mode_2,
-        authenticated_uid
+        authenticated_uid, session.primary_output
       });
       if (transition == plank::session::display_request_status::submitted) {
         tree.put("root.<xmlattr>.status_code", 425);
@@ -1089,6 +1113,9 @@ namespace nvhttp {
     launch_session->host_layout = get_arg(args, "plankHostLayout", "");
     launch_session->virtual_mode_1 = get_arg(args, "plankVirtualMode1", "");
     launch_session->virtual_mode_2 = get_arg(args, "plankVirtualMode2", "");
+    const auto primary_output = get_arg(args, "plankPrimaryOutput", "");
+    launch_session->primary_output = primary_output.empty() ? -1 :
+      primary_output == "0" ? 0 : primary_output == "1" ? 1 : -2;
     launch_session->capture_source = get_arg(args, "plankCaptureSource", "");
     launch_session->encoder_backend = get_arg(args, "plankEncoderBackend", "");
     launch_session->encoding_mode = get_arg(args, "plankEncodingMode", "");
