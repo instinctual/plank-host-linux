@@ -6,9 +6,9 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <vector>
 
+#include "raw_hid_contact.h"
 #include "thread_safe.h"
 
 namespace raw_hid {
@@ -20,39 +20,6 @@ namespace raw_hid {
    * @return True when raw tablet redirection can be offered to a client.
    */
   bool available();
-
-  /**
-   * @brief Input-core state of one mirrored tablet input node.
-   */
-  struct input_node_state_t {
-    std::vector<std::uint16_t> held_keys;  ///< Key and button codes the input core reports as down.
-    std::optional<std::int32_t> pressure;  ///< ABS_PRESSURE value when the node reports pressure.
-    std::optional<std::int32_t> mt_current_slot;  ///< Current ABS_MT_SLOT when the node is multitouch.
-    std::vector<std::int32_t> mt_tracking_ids;  ///< ABS_MT_TRACKING_ID of every slot on a multitouch node.
-  };
-
-  /**
-   * @brief One event injected into a mirrored tablet input node.
-   */
-  struct release_event_t {
-    std::uint16_t type;  ///< Linux input event type.
-    std::uint16_t code;  ///< Linux input event code.
-    std::int32_t value;  ///< Event value.
-
-    bool operator==(const release_event_t &) const = default;
-  };
-
-  /**
-   * @brief Plan the events that end pen, button, key and touch contact on one node.
-   *
-   * Tool proximity keys are left alone: hid-wacom tracks tool proximity itself,
-   * and clearing it behind the driver would drop the next proximity-in. Every
-   * released control is sent again with the first real report after resume.
-   *
-   * @param state Current state of one mirrored input node.
-   * @return Events ending with SYN_REPORT, or none when nothing is held.
-   */
-  std::vector<release_event_t> plan_contact_release(const input_node_state_t &state);
 
   /**
    * @brief Owns virtual HID interfaces created for one streaming session.

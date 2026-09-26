@@ -4,10 +4,6 @@
 
 #include <gtest/gtest.h>
 
-#ifdef __linux__
-  #include <linux/input.h>
-#endif
-
 extern "C" {
 #include <moonlight-common-c/src/plank.h>
 }
@@ -171,89 +167,3 @@ TEST(RawHidTablet, ReusesIdenticalEndpointsAcrossFocusAndTransportResume) {
   ASSERT_TRUE(tablet.handle(make_frame(PLANK_RAW_HID_DESCRIPTOR, 0, 10, descriptor, sizeof(descriptor))));
   EXPECT_GT(tablet.endpoint_epoch(), initial_epoch);
 }
-
-#ifdef __linux__
-TEST(RawHidTablet, ReleasesPenContactWithoutLeavingProximity) {
-  raw_hid::input_node_state_t pen;
-  pen.held_keys = {BTN_TOOL_PEN, BTN_TOUCH, BTN_STYLUS};
-  pen.pressure = 4096;
-
-  const std::vector<raw_hid::release_event_t> expected {
-    {EV_KEY, BTN_TOUCH, 0},
-    {EV_KEY, BTN_STYLUS, 0},
-    {EV_ABS, ABS_PRESSURE, 0},
-    {EV_SYN, SYN_REPORT, 0},
-  };
-  EXPECT_EQ(raw_hid::plan_contact_release(pen), expected);
-}
-
-TEST(RawHidTablet, KeepsToolProximityOnPenAndPadNodes) {
-  raw_hid::input_node_state_t tools;
-  tools.held_keys = {
-    BTN_TOOL_PEN,
-    BTN_TOOL_RUBBER,
-    BTN_TOOL_BRUSH,
-    BTN_TOOL_PENCIL,
-    BTN_TOOL_AIRBRUSH,
-    BTN_TOOL_FINGER,
-    BTN_TOOL_MOUSE,
-    BTN_TOOL_LENS,
-  };
-  tools.pressure = 0;
-
-  EXPECT_TRUE(raw_hid::plan_contact_release(tools).empty());
-}
-
-TEST(RawHidTablet, ReleasesHeldPadKeys) {
-  raw_hid::input_node_state_t pad;
-  pad.held_keys = {BTN_0, BTN_5, BTN_TOOL_FINGER};
-
-  const std::vector<raw_hid::release_event_t> expected {
-    {EV_KEY, BTN_0, 0},
-    {EV_KEY, BTN_5, 0},
-    {EV_SYN, SYN_REPORT, 0},
-  };
-  EXPECT_EQ(raw_hid::plan_contact_release(pad), expected);
-}
-
-TEST(RawHidTablet, EndsActiveTouchesAndRestoresCurrentSlot) {
-  raw_hid::input_node_state_t touch;
-  touch.mt_current_slot = 2;
-  touch.mt_tracking_ids = {14, -1, 15};
-  touch.held_keys = {BTN_TOUCH, BTN_TOOL_DOUBLETAP};
-
-  const std::vector<raw_hid::release_event_t> expected {
-    {EV_ABS, ABS_MT_SLOT, 0},
-    {EV_ABS, ABS_MT_TRACKING_ID, -1},
-    {EV_ABS, ABS_MT_SLOT, 2},
-    {EV_ABS, ABS_MT_TRACKING_ID, -1},
-    {EV_ABS, ABS_MT_SLOT, 2},
-    {EV_KEY, BTN_TOUCH, 0},
-    {EV_KEY, BTN_TOOL_DOUBLETAP, 0},
-    {EV_SYN, SYN_REPORT, 0},
-  };
-  EXPECT_EQ(raw_hid::plan_contact_release(touch), expected);
-}
-
-TEST(RawHidTablet, ReleasesResidualPressureAlone) {
-  raw_hid::input_node_state_t pen;
-  pen.held_keys = {BTN_TOOL_PEN};
-  pen.pressure = 12;
-
-  const std::vector<raw_hid::release_event_t> expected {
-    {EV_ABS, ABS_PRESSURE, 0},
-    {EV_SYN, SYN_REPORT, 0},
-  };
-  EXPECT_EQ(raw_hid::plan_contact_release(pen), expected);
-}
-
-TEST(RawHidTablet, PlansNothingWithoutHeldContact) {
-  raw_hid::input_node_state_t idle;
-  idle.pressure = 0;
-  idle.mt_current_slot = 0;
-  idle.mt_tracking_ids = {-1, -1};
-
-  EXPECT_TRUE(raw_hid::plan_contact_release(idle).empty());
-  EXPECT_TRUE(raw_hid::plan_contact_release({}).empty());
-}
-#endif

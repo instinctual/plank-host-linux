@@ -20,10 +20,8 @@
 #ifdef __linux__
   #include <dirent.h>
   #include <fcntl.h>
-  #include <linux/input.h>
   #include <linux/uhid.h>
   #include <poll.h>
-  #include <sys/ioctl.h>
   #include <unistd.h>
 #endif
 
@@ -68,109 +66,6 @@ namespace raw_hid {
     }
 
 #ifdef __linux__
-    constexpr std::size_t bits_per_long = sizeof(unsigned long) * 8;
-    constexpr std::int32_t max_mt_slots = 64;  ///< Bound on slots read from one multitouch node.
-
-    /**
-     * @brief Return whether a key reports tool proximity rather than contact.
-     *
-     * Pen, eraser and puck tool keys are proximity state owned by hid-wacom.
-     * Finger tool keys are proximity on pen and pad nodes, but on multitouch
-     * nodes they are contact counts derived from the slots.
-     *
-     * @param code Key code.
-     * @param multitouch Whether the node reports multitouch slots.
-     * @return True when the key must stay as it is.
-     */
-    bool is_proximity_key(std::uint16_t code, bool multitouch) {
-      switch (code) {
-        case BTN_TOOL_PEN:
-        case BTN_TOOL_RUBBER:
-        case BTN_TOOL_BRUSH:
-        case BTN_TOOL_PENCIL:
-        case BTN_TOOL_AIRBRUSH:
-        case BTN_TOOL_MOUSE:
-        case BTN_TOOL_LENS:
-          return true;
-        case BTN_TOOL_FINGER:
-        case BTN_TOOL_DOUBLETAP:
-        case BTN_TOOL_TRIPLETAP:
-        case BTN_TOOL_QUADTAP:
-        case BTN_TOOL_QUINTTAP:
-          return !multitouch;
-        default:
-          return false;
-      }
-    }
-
-    /**
-     * @brief Test one bit of a kernel bitmap.
-     *
-     * @param bits Bitmap returned by an evdev ioctl.
-     * @param bit Bit number.
-     * @return True when the bit is set.
-     */
-    bool test_bit(std::span<const unsigned long> bits, unsigned int bit) {
-      return bit / bits_per_long < bits.size() && ((bits[bit / bits_per_long] >> (bit % bits_per_long)) & 1UL) != 0;
-    }
-
-    /**
-     * @brief Read the input-core state that decides how to release one node.
-     *
-     * @param fd Open evdev node.
-     * @return Held keys, pressure and multitouch slots of the node.
-     */
-    input_node_state_t read_node_state(int fd) {
-      input_node_state_t state;
-
-      std::array<unsigned long, (KEY_CNT + bits_per_long - 1) / bits_per_long> keys {};
-      if (ioctl(fd, EVIOCGKEY(sizeof(keys)), keys.data()) >= 0) {
-        for (unsigned int code = 0; code < KEY_CNT; ++code) {
-          if (test_bit(keys, code)) {
-            state.held_keys.push_back(static_cast<std::uint16_t>(code));
-          }
-        }
-      }
-
-      std::array<unsigned long, (ABS_CNT + bits_per_long - 1) / bits_per_long> axes {};
-      if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(axes)), axes.data()) < 0) {
-        return state;
-      }
-      input_absinfo info {};
-      if (test_bit(axes, ABS_PRESSURE) && ioctl(fd, EVIOCGABS(ABS_PRESSURE), &info) >= 0) {
-        state.pressure = info.value;
-      }
-      if (test_bit(axes, ABS_MT_SLOT) && test_bit(axes, ABS_MT_TRACKING_ID) &&
-          ioctl(fd, EVIOCGABS(ABS_MT_SLOT), &info) >= 0 && info.maximum >= 0 && info.maximum < max_mt_slots) {
-        // EVIOCGMTSLOTS fills a u32 code followed by one s32 value per slot.
-        std::vector<std::int32_t> request(static_cast<std::size_t>(info.maximum) + 2);
-        request[0] = ABS_MT_TRACKING_ID;
-        if (ioctl(fd, EVIOCGMTSLOTS(request.size() * sizeof(std::int32_t)), request.data()) >= 0) {
-          state.mt_current_slot = info.value;
-          state.mt_tracking_ids.assign(request.begin() + 1, request.end());
-        }
-      }
-      return state;
-    }
-
-    /**
-     * @brief Inject planned release events into one evdev node.
-     *
-     * @param fd Evdev node opened for writing.
-     * @param plan Events from plan_contact_release().
-     * @return True when the kernel accepted every event.
-     */
-    bool write_release(int fd, const std::vector<release_event_t> &plan) {
-      std::vector<input_event> events(plan.size());
-      for (std::size_t index = 0; index < plan.size(); ++index) {
-        events[index].type = plan[index].type;
-        events[index].code = plan[index].code;
-        events[index].value = plan[index].value;
-      }
-      const auto size = events.size() * sizeof(input_event);
-      return write(fd, events.data(), size) == static_cast<ssize_t>(size);
-    }
-
     /**
      * @brief Read the physical path of one input event node from sysfs.
      *
@@ -185,39 +80,6 @@ namespace raw_hid {
     }
 #endif
   }  // namespace
-
-#ifdef __linux__
-  std::vector<release_event_t> plan_contact_release(const input_node_state_t &state) {
-    std::vector<release_event_t> events;
-    const bool multitouch = state.mt_current_slot.has_value();
-    if (multitouch) {
-      bool moved_slot = false;
-      for (std::size_t slot = 0; slot < state.mt_tracking_ids.size(); ++slot) {
-        if (state.mt_tracking_ids[slot] < 0) {
-          continue;
-        }
-        events.push_back({EV_ABS, ABS_MT_SLOT, static_cast<std::int32_t>(slot)});
-        events.push_back({EV_ABS, ABS_MT_TRACKING_ID, -1});
-        moved_slot = true;
-      }
-      if (moved_slot) {
-        events.push_back({EV_ABS, ABS_MT_SLOT, *state.mt_current_slot});
-      }
-    }
-    for (const auto code : state.held_keys) {
-      if (!is_proximity_key(code, multitouch)) {
-        events.push_back({EV_KEY, code, 0});
-      }
-    }
-    if (state.pressure.value_or(0) != 0) {
-      events.push_back({EV_ABS, ABS_PRESSURE, 0});
-    }
-    if (!events.empty()) {
-      events.push_back({EV_SYN, SYN_REPORT, 0});
-    }
-    return events;
-  }
-#endif
 
   class tablet_t::impl_t {
   public:
@@ -571,7 +433,8 @@ namespace raw_hid {
      * kernel would otherwise keep the last reported tip, buttons, keys and
      * touches until the next report, which then draws from the old contact
      * point to the new one. Only releases are injected; tool proximity stays.
-     * Injection is ignored while another client holds EVIOCGRAB on a node.
+     * evdev injects through its shared input handle, including when an evdev
+     * reader owns a grab. Verify input-core state before reporting success.
      */
     void release_retained_contacts() {
       if (retained_phys_.empty()) {
@@ -579,26 +442,36 @@ namespace raw_hid {
       }
       DIR *directory = opendir("/sys/class/input");
       if (directory == nullptr) {
+        const int error_code = errno;
+        BOOST_LOG(warning) << "Raw HID tablet cannot scan retained input nodes: "sv << std::strerror(error_code);
         return;
       }
       int released = 0;
-      while (const dirent *entry = readdir(directory)) {
+      for (;;) {
+        errno = 0;
+        const dirent *entry = readdir(directory);
+        if (entry == nullptr) {
+          const int error_code = errno;
+          if (error_code != 0) {
+            BOOST_LOG(warning) << "Raw HID tablet input-node scan failed: "sv << std::strerror(error_code);
+          }
+          break;
+        }
         if (std::strncmp(entry->d_name, "event", 5) != 0 || read_phys(entry->d_name) != retained_phys_) {
           continue;
         }
         const std::string path = "/dev/input/"s + entry->d_name;
         const int fd = open(path.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
         if (fd < 0) {
-          BOOST_LOG(warning) << "Raw HID tablet cannot open "sv << path << " to release contact: "sv << std::strerror(errno);
+          const int error_code = errno;
+          BOOST_LOG(warning) << "Raw HID tablet cannot open "sv << path << " to release contact: "sv << std::strerror(error_code);
           continue;
         }
-        const auto plan = plan_contact_release(read_node_state(fd));
-        if (!plan.empty()) {
-          if (write_release(fd, plan)) {
-            ++released;
-          } else {
-            BOOST_LOG(warning) << "Raw HID tablet cannot release contact on "sv << path << ": "sv << std::strerror(errno);
-          }
+        const auto result = release_node_contacts(fd);
+        if (result.error != 0) {
+          BOOST_LOG(warning) << "Raw HID tablet contact cleanup failed on "sv << path << " ("sv << result.operation << "): "sv << std::strerror(result.error);
+        } else if (result.released) {
+          ++released;
         }
         close(fd);
       }
