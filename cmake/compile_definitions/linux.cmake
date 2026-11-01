@@ -10,12 +10,6 @@ else()
     add_compile_definitions(SUNSHINE_PLATFORM="linux")
 endif()
 
-# AppImage
-if(${SUNSHINE_BUILD_APPIMAGE})
-    # use relative assets path for AppImage
-    string(REPLACE "${CMAKE_INSTALL_PREFIX}" ".${CMAKE_INSTALL_PREFIX}" SUNSHINE_ASSETS_DIR_DEF ${SUNSHINE_ASSETS_DIR})
-endif()
-
 # cuda
 set(CUDA_FOUND OFF)
 if(${SUNSHINE_ENABLE_CUDA})
@@ -309,14 +303,6 @@ set(LIBEVDEV_CUSTOM_LIBRARY "${EVDEV_LIBRARY}")
 
 list(APPEND PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/linux/input/virtualhid.cpp")
-
-# AppImage and Flatpak
-if (${SUNSHINE_BUILD_APPIMAGE})
-    list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_BUILD_APPIMAGE=1)
-endif ()
-if (${SUNSHINE_BUILD_FLATPAK})
-    list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_BUILD_FLATPAK=1)
-endif ()
 
 include_directories(SYSTEM
         ${CMAKE_BINARY_DIR}/generated-src)

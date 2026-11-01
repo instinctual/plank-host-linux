@@ -2087,9 +2087,6 @@ namespace platf {
 
         if (!fb->handles[0]) {
           BOOST_LOG(error) << "Couldn't get handle for DRM Framebuffer ["sv << plane->fb_id << "]: Probably not permitted"sv;
-#if defined(SUNSHINE_BUILD_FLATPAK) || defined(SUNSHINE_BUILD_APPIMAGE)
-          BOOST_LOG(error) << "AppImage and Flatpak do not support KMS capture."sv;
-#endif
           break;
         }
 

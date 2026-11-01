@@ -14,6 +14,10 @@ releases and qualification tests.
 [`apps/host/macos/`](https://github.com/instinctual/plank/tree/main/apps/host/macos)
 of the main repository. It is not built from this Linux Host fork.**
 
+The obsolete macOS backend and upstream CPack, Flatpak, AppImage and Homebrew
+packaging have been removed. Use the parent repository's explicit RPM manifest;
+`PLANK_PRODUCT_BUILD=OFF` is no longer a supported build mode.
+
 [Downloads](https://github.com/instinctual/plank/releases) ·
 [Documentation](https://github.com/instinctual/plank/blob/main/docs/README.md) ·
 [Build from source](https://github.com/instinctual/plank/blob/main/docs/development/build/from-source.md)

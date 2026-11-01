@@ -1,11 +1,7 @@
 # common target definitions
 # this file will also load platform specific macros
 
-if(APPLE AND NOT SUNSHINE_BUILD_HOMEBREW)
-    add_executable(sunshine MACOSX_BUNDLE ${SUNSHINE_TARGET_FILES})
-else()
-    add_executable(sunshine ${SUNSHINE_TARGET_FILES})
-endif()
+add_executable(sunshine ${SUNSHINE_TARGET_FILES})
 foreach(dep ${SUNSHINE_TARGET_DEPENDENCIES})
     add_dependencies(sunshine ${dep})  # compile these before sunshine
 endforeach()
@@ -14,13 +10,7 @@ endforeach()
 if(WIN32)
     include(${CMAKE_MODULE_PATH}/targets/windows.cmake)
 elseif(UNIX)
-    include(${CMAKE_MODULE_PATH}/targets/unix.cmake)
-
-    if(APPLE)
-        include(${CMAKE_MODULE_PATH}/targets/macos.cmake)
-    else()
-        include(${CMAKE_MODULE_PATH}/targets/linux.cmake)
-    endif()
+    include(${CMAKE_MODULE_PATH}/targets/linux.cmake)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

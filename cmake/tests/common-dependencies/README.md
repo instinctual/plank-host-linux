@@ -37,7 +37,7 @@ When lizardbyte-common's Python dependencies change, refresh the **Host's**
 `uv.lock`, not only the dependency's lockfile. Python 3.14+ is required:
 
 ```sh
-git submodule update --init third-party/glad packaging/linux/flatpak/deps/flatpak-builder-tools
+git submodule update --init third-party/glad
 uv lock --python 3.14
 uv lock --check --python 3.14
 uv sync --locked --group glad --python 3.14

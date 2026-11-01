@@ -31,8 +31,8 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(Apple)?Clang$")
     # Clang doesn't actually complain about this this, so disabling for now
     # list(APPEND SUNSHINE_COMPILE_OPTIONS -Wno-uninitialized)
 
-    # Some libc++ versions on Apple and FreeBSD guard std::jthread behind this flag.
-    if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    # Some libc++ versions on FreeBSD guard std::jthread behind this flag.
+    if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
         list(APPEND SUNSHINE_COMPILE_OPTIONS -fexperimental-library)
         list(APPEND SUNSHINE_LINK_OPTIONS -fexperimental-library)
     endif()
@@ -52,11 +52,7 @@ if(WIN32)
 elseif(UNIX)
     include(${CMAKE_MODULE_PATH}/compile_definitions/unix.cmake)
 
-    if(APPLE)
-        include(${CMAKE_MODULE_PATH}/compile_definitions/macos.cmake)
-    else()
-        include(${CMAKE_MODULE_PATH}/compile_definitions/linux.cmake)
-    endif()
+    include(${CMAKE_MODULE_PATH}/compile_definitions/linux.cmake)
 endif()
 
 # libvirtualhid
@@ -119,7 +115,7 @@ if(WIN32)
     )
 elseif(CUDA_FOUND)
     # Linux currently consumes the prepared API 13 headers used by the
-    # qualified NVIDIA 580 driver. Build the platform-neutral standalone
+    # qualified NVIDIA driver baseline. Build the platform-neutral standalone
     # NVENC core here so the CUDA input adapter can use reference-picture
     # invalidation without routing through FFmpeg's private NVENC state.
     add_library(nvenc_sdk_1300 OBJECT
@@ -225,7 +221,7 @@ include_directories(
         ${OPENSSL_INCLUDE_DIR}
         ${Opus_INCLUDE_DIR}
         ${FFMPEG_INCLUDE_DIRS}
-        ${Boost_INCLUDE_DIRS}  # has to be the last, or we get runtime error on macOS ffmpeg encoder
+        ${Boost_INCLUDE_DIRS}
 )
 
 if(WIN32)

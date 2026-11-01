@@ -14,17 +14,10 @@ option(PLANK_ENABLE_TRANSPORT
 set(PLANK_TRANSPORT_DIR "" CACHE PATH
         "Path to the PLANK transport Rust transport crate.")
 
-# if this option is set, the build will exit after configuring special package configuration files
-option(SUNSHINE_CONFIGURE_ONLY "Configure special files only, then exit." OFF)
-
 option(SUNSHINE_SYSTEM_VULKAN_HEADERS "Use system installation of vulkan-headers rather than the submodule." OFF)
 option(SUNSHINE_SYSTEM_WAYLAND_PROTOCOLS "Use system installation of wayland-protocols rather than the submodule." OFF)
 
-if(APPLE)
-    option(BOOST_USE_STATIC "Use static boost libraries." OFF)
-else()
-    option(BOOST_USE_STATIC "Use static boost libraries." ON)
-endif()
+option(BOOST_USE_STATIC "Use static boost libraries." ON)
 
 option(CUDA_FAIL_ON_MISSING "Fail the build if CUDA is not found." ON)
 option(CUDA_INHERIT_COMPILE_OPTIONS
@@ -32,25 +25,6 @@ option(CUDA_INHERIT_COMPILE_OPTIONS
         your IDE throws errors about unknown flags after running cmake." ON)
 
 if(UNIX)
-    option(SUNSHINE_BUILD_HOMEBREW
-            "Enable a Homebrew build." OFF)
-    option(SUNSHINE_CONFIGURE_HOMEBREW
-            "Configure Homebrew formula. Recommended to use with SUNSHINE_CONFIGURE_ONLY" OFF)
-endif()
-
-if(APPLE)
-    option(SUNSHINE_CONFIGURE_PORTFILE
-            "Configure macOS Portfile. Recommended to use with SUNSHINE_CONFIGURE_ONLY" OFF)
-elseif(UNIX)  # Linux
-    option(SUNSHINE_BUILD_APPIMAGE
-            "Enable an AppImage build." OFF)
-    option(SUNSHINE_BUILD_FLATPAK
-            "Enable a Flatpak build." OFF)
-    option(SUNSHINE_CONFIGURE_PKGBUILD
-            "Configure files required for AUR. Recommended to use with SUNSHINE_CONFIGURE_ONLY" OFF)
-    option(SUNSHINE_CONFIGURE_FLATPAK_MAN
-            "Configure manifest file required for Flatpak build. Recommended to use with SUNSHINE_CONFIGURE_ONLY" OFF)
-
     # Linux capture methods
     option(SUNSHINE_ENABLE_CUDA
             "Enable cuda specific code." ON)

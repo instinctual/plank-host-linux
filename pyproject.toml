@@ -23,11 +23,6 @@ glad = [
     "glad2",
 ]
 
-flatpak = [
-    "flatpak_node_generator",
-    "flatpak_pip_generator",
-]
-
 [project.urls]
 Homepage = "https://app.lizardbyte.dev/Sunshine"
 Repository = "https://github.com/LizardByte/Sunshine"
@@ -37,7 +32,5 @@ Issues = "https://github.com/LizardByte/Sunshine/issues"
 py-modules = []
 
 [tool.uv.sources]
-flatpak_node_generator = { path = "packaging/linux/flatpak/deps/flatpak-builder-tools/node" }
-flatpak_pip_generator = { path = "packaging/linux/flatpak/deps/flatpak-builder-tools/pip" }
 glad2 = { path = "third-party/glad" }
 lizardbyte-common = { path = "third-party/lizardbyte-common" }
