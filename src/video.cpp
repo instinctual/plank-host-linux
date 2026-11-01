@@ -29,9 +29,6 @@ extern "C" {
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
-#if !defined(_WIN32) && !defined(__APPLE__)
-  #include <ffnvcodec/nvEncodeAPI.h>
-#endif
 }
 
 // local includes
@@ -235,27 +232,6 @@ namespace video {
     av_buffer_unref(&ref);
   }
 
-  namespace nv {
-
-    /**
-     * @brief Enumerates supported profile h264 options.
-     */
-    enum class profile_h264_e : int {
-      high = 2,  ///< High profile
-      high_444p = 3,  ///< High 4:4:4 Predictive profile
-    };
-
-    /**
-     * @brief Enumerates supported profile HEVC options.
-     */
-    enum class profile_hevc_e : int {
-      main = 0,  ///< Main profile
-      main_10 = 1,  ///< Main 10 profile
-      rext = 2,  ///< Rext profile
-    };
-
-  }  // namespace nv
-
   namespace qsv {
 
     /**
@@ -318,34 +294,6 @@ namespace video {
    * @return Hardware buffer on success, or an error code on failure.
    */
   util::Either<avcodec_buffer_t, int> dxgi_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
-  /**
-   * @brief Create an FFmpeg hardware device buffer for VA-API input.
-   *
-   * @param encode_device Encode device.
-   * @return Hardware buffer on success, or an error code on failure.
-   */
-  util::Either<avcodec_buffer_t, int> vaapi_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
-  /**
-   * @brief Create an FFmpeg hardware device buffer for CUDA input.
-   *
-   * @param encode_device Encode device.
-   * @return Hardware buffer on success, or an error code on failure.
-   */
-  util::Either<avcodec_buffer_t, int> cuda_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
-  /**
-   * @brief Create an FFmpeg hardware device buffer for VideoToolbox input.
-   *
-   * @param encode_device Encode device.
-   * @return Hardware buffer on success, or an error code on failure.
-   */
-  util::Either<avcodec_buffer_t, int> vt_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
-  /**
-   * @brief Create an FFmpeg hardware device buffer for Vulkan input.
-   *
-   * @return Hardware buffer on success, or an error code on failure.
-   */
-  util::Either<avcodec_buffer_t, int> vulkan_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
-
   /**
    * @brief FFmpeg software encode device used when no hardware frames are required.
    */
@@ -929,110 +877,11 @@ namespace video {
     },
     PARALLEL_ENCODING | REF_FRAMES_INVALIDATION | YUV444_SUPPORT | ASYNC_TEARDOWN  // flags
   };
-#elif !defined(__APPLE__)
-  encoder_t nvenc {
-    "nvenc"sv,
-    std::make_unique<encoder_platform_formats_avcodec>(
-  #ifdef _WIN32
-      AV_HWDEVICE_TYPE_D3D11VA,
-      AV_HWDEVICE_TYPE_NONE,
-      AV_PIX_FMT_D3D11,
-  #else
-      AV_HWDEVICE_TYPE_CUDA,
-      AV_HWDEVICE_TYPE_NONE,
-      AV_PIX_FMT_CUDA,
-  #endif
-      AV_PIX_FMT_NV12,
-      AV_PIX_FMT_P010,
-      AV_PIX_FMT_YUV444P,
-      AV_PIX_FMT_YUV444P16,
-  #ifdef _WIN32
-      dxgi_init_avcodec_hardware_input_buffer
-  #else
-      cuda_init_avcodec_hardware_input_buffer
-  #endif
-    ),
-    {
-      // Common options
-      {
-        {"delay"s, 0},
-        {"forced-idr"s, 1},
-        {"zerolatency"s, 1},
-        {"surfaces"s, 1},
-        {"cbr_padding"s, false},
-        {"preset"s, &config::video.nv_legacy.preset},
-        {"tune"s, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY},
-        {"rc"s, NV_ENC_PARAMS_RC_CBR},
-        {"multipass"s, &config::video.nv_legacy.multipass},
-        {"aq"s, &config::video.nv_legacy.aq},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "av1_nvenc"s,
-    },
-    {
-      // Common options
-      {
-        {"delay"s, 0},
-        {"forced-idr"s, 1},
-        {"zerolatency"s, 1},
-        {"surfaces"s, 1},
-        {"cbr_padding"s, false},
-        {"preset"s, &config::video.nv_legacy.preset},
-        {"tune"s, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY},
-        {"rc"s, NV_ENC_PARAMS_RC_CBR},
-        {"multipass"s, &config::video.nv_legacy.multipass},
-        {"aq"s, &config::video.nv_legacy.aq},
-      },
-      {
-        // SDR-specific options
-        {"profile"s, std::to_underlying(nv::profile_hevc_e::main)},
-      },
-      {
-        // HDR-specific options
-        {"profile"s, std::to_underlying(nv::profile_hevc_e::main_10)},
-      },
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "hevc_nvenc"s,
-    },
-    {
-      {
-        {"delay"s, 0},
-        {"forced-idr"s, 1},
-        {"zerolatency"s, 1},
-        {"surfaces"s, 1},
-        {"cbr_padding"s, false},
-        {"preset"s, &config::video.nv_legacy.preset},
-        {"tune"s, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY},
-        {"rc"s, NV_ENC_PARAMS_RC_CBR},
-        {"coder"s, &config::video.nv_legacy.h264_coder},
-        {"multipass"s, &config::video.nv_legacy.multipass},
-        {"aq"s, &config::video.nv_legacy.aq},
-      },
-      {
-        // SDR-specific options
-        {"profile"s, std::to_underlying(nv::profile_h264_e::high)},
-      },
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "h264_nvenc"s,
-    },
-    PARALLEL_ENCODING | YUV444_SUPPORT
-  };
 #endif
 
 #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
   /**
-   * Opt-in direct CUDA NVENC backend. Keep the FFmpeg-backed `nvenc` encoder
-   * first in automatic selection until live RFI and fallback qualification
-   * are complete.
+   * @brief Direct CUDA NVENC backend qualified for each PLANK hardware profile.
    */
   encoder_t nvenc_direct {
     "nvenc-direct"sv,
@@ -1333,6 +1182,7 @@ namespace video {
   };
 #endif
 
+#ifdef _WIN32
   /**
    * @brief Software.
    */
@@ -1389,6 +1239,7 @@ namespace video {
     },
     H264_ONLY | PARALLEL_ENCODING | ALWAYS_REPROBE | YUV444_SUPPORT
   };
+#endif
 
 #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
   /**
@@ -1428,240 +1279,15 @@ namespace video {
   };
 #endif
 
-#if defined(__linux__) || defined(linux) || defined(__linux) || defined(__FreeBSD__)
-  /**
-   * @brief VA-API.
-   */
-  encoder_t vaapi {
-    "vaapi"sv,
-    std::make_unique<encoder_platform_formats_avcodec>(
-      AV_HWDEVICE_TYPE_VAAPI,
-      AV_HWDEVICE_TYPE_NONE,
-      AV_PIX_FMT_VAAPI,
-      AV_PIX_FMT_NV12,
-      AV_PIX_FMT_P010,
-      AV_PIX_FMT_NONE,
-      AV_PIX_FMT_NONE,
-      vaapi_init_avcodec_hardware_input_buffer
-    ),
-    {
-      // Common options
-      {
-        {"async_depth"s, 1},
-        {"blbrc"s, &config::video.vaapi.blbrc},
-        {"idr_interval"s, std::numeric_limits<int>::max()},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "av1_vaapi"s,
-    },
-    {
-      // Common options
-      {
-        {"async_depth"s, 1},
-        {"blbrc"s, &config::video.vaapi.blbrc},
-        {"sei"s, 0},
-        {"idr_interval"s, std::numeric_limits<int>::max()},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "hevc_vaapi"s,
-    },
-    {
-      // Common options
-      {
-        {"async_depth"s, 1},
-        {"blbrc"s, &config::video.vaapi.blbrc},
-        {"sei"s, 0},
-        {"idr_interval"s, std::numeric_limits<int>::max()},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "h264_vaapi"s,
-    },
-    // RC buffer size will be set in platform code if supported
-    LIMITED_GOP_SIZE | PARALLEL_ENCODING | NO_RC_BUF_LIMIT
-  };
-
-  #ifdef SUNSHINE_BUILD_VULKAN
-  encoder_t vulkan {
-    "vulkan"sv,
-    std::make_unique<encoder_platform_formats_avcodec>(
-      AV_HWDEVICE_TYPE_VULKAN,
-      AV_HWDEVICE_TYPE_NONE,
-      AV_PIX_FMT_VULKAN,
-      AV_PIX_FMT_NV12,
-      AV_PIX_FMT_P010,
-      AV_PIX_FMT_NONE,
-      AV_PIX_FMT_NONE,
-      vulkan_init_avcodec_hardware_input_buffer
-    ),
-    {
-      // AV1
-      {
-        {"idr_interval"s, std::numeric_limits<int>::max()},
-        {"tune"s, &config::video.vk.tune},
-        {"rc_mode"s, &config::video.vk.rc_mode},
-        {"units"s, 0},
-        {"usage"s, "stream"s},
-        {"content"s, "rendered"s},
-        {"async_depth"s, 1},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "av1_vulkan"s,
-    },
-    {
-      // HEVC
-      {
-        {"idr_interval"s, std::numeric_limits<int>::max()},
-        {"tune"s, &config::video.vk.tune},
-        {"rc_mode"s, &config::video.vk.rc_mode},
-        {"units"s, 0},
-        {"usage"s, "stream"s},
-        {"content"s, "rendered"s},
-        {"async_depth"s, 1},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "hevc_vulkan"s,
-    },
-    {
-      // H.264
-      {
-        {"idr_interval"s, std::numeric_limits<int>::max()},
-        {"tune"s, &config::video.vk.tune},
-        {"rc_mode"s, &config::video.vk.rc_mode},
-        {"units"s, 0},
-        {"usage"s, "stream"s},
-        {"content"s, "rendered"s},
-        {"async_depth"s, 1},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "h264_vulkan"s,
-    },
-    LIMITED_GOP_SIZE | PARALLEL_ENCODING
-  };
-  #endif  // SUNSHINE_BUILD_VULKAN
-#endif  // linux
-
-#ifdef __APPLE__
-  /**
-   * @brief Videotoolbox.
-   */
-  encoder_t videotoolbox {
-    "videotoolbox"sv,
-    std::make_unique<encoder_platform_formats_avcodec>(
-      AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
-      AV_HWDEVICE_TYPE_NONE,
-      AV_PIX_FMT_VIDEOTOOLBOX,
-      AV_PIX_FMT_NV12,
-      AV_PIX_FMT_P010,
-      AV_PIX_FMT_NONE,
-      AV_PIX_FMT_NONE,
-      vt_init_avcodec_hardware_input_buffer
-    ),
-    {
-      // Common options
-      {
-        {"allow_sw"s, &config::video.vt.vt_allow_sw},
-        {"require_sw"s, &config::video.vt.vt_require_sw},
-        {"realtime"s, &config::video.vt.vt_realtime},
-        {"prio_speed"s, 1},
-        {"max_ref_frames"s, 1},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "av1_videotoolbox"s,
-    },
-    {
-      // Common options
-      {
-        {"allow_sw"s, &config::video.vt.vt_allow_sw},
-        {"require_sw"s, &config::video.vt.vt_require_sw},
-        {"realtime"s, &config::video.vt.vt_realtime},
-        {"prio_speed"s, 1},
-        {"max_ref_frames"s, 1},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "hevc_videotoolbox"s,
-    },
-    {
-      // Common options
-      // Note: max_ref_frames is intentionally omitted for H.264 because
-      // VideoToolbox on Apple Silicon produces all-IDR output when
-      // ReferenceBufferCount=1 is set for H.264, causing massive bandwidth
-      // inflation (~3x) and frame drops. HEVC and AV1 are unaffected and
-      // retain max_ref_frames=1. See LizardByte/Sunshine#5013.
-      {
-        {"allow_sw"s, &config::video.vt.vt_allow_sw},
-        {"require_sw"s, &config::video.vt.vt_require_sw},
-        {"realtime"s, &config::video.vt.vt_realtime},
-        {"prio_speed"s, 1},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {
-        // Fallback options
-        {"flags"s, "-low_delay"},
-      },
-      "h264_videotoolbox"s,
-    },
-    PARALLEL_ENCODING
-  };
-#endif
-
-  static const std::vector<encoder_t *> encoders {
-#ifndef __APPLE__
-    &nvenc,
-#endif
 #ifdef _WIN32
+  static const std::vector<encoder_t *> encoders {
+    &nvenc,
     &quicksync,
     &amdvce,
     &mediafoundation,
-#endif
-#if defined(__linux__) || defined(linux) || defined(__linux) || defined(__FreeBSD__)
-  #ifdef SUNSHINE_BUILD_VULKAN
-    &vulkan,
-  #endif
-    &vaapi,
-#endif
-#ifdef __APPLE__
-    &videotoolbox,
-#endif
-#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
-    &software_cuda,
-#endif
     &software
   };
+#endif
 
   static encoder_t *chosen_encoder;
   bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
@@ -2652,11 +2278,6 @@ namespace video {
         } else {
           ctx->rc_buffer_size = bitrate / config.framerate;
 
-#ifndef __APPLE__
-          if (encoder.name == "nvenc" && config::video.nv_legacy.vbv_percentage_increase > 0) {
-            ctx->rc_buffer_size += ctx->rc_buffer_size * config::video.nv_legacy.vbv_percentage_increase / 100;
-          }
-#endif
         }
       }
 
@@ -3914,8 +3535,6 @@ namespace video {
       return -1;
     }
 
-    auto encoder_list = encoders;
-
     // If we already have a good encoder, check to see if another probe is required
     if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
       return 0;
@@ -3945,7 +3564,8 @@ namespace video {
       return -1;
     }
     chosen_encoder = software_cuda_qualified ? &software_cuda : &nvenc_direct;
-#else
+#elif defined(_WIN32)
+    auto encoder_list = encoders;
     KITTY_WHILE_LOOP(auto pos = std::begin(encoder_list), pos != std::end(encoder_list), {
         auto encoder = *pos;
 
@@ -3962,6 +3582,9 @@ namespace video {
       chosen_encoder = encoder;
       break;
     });
+#else
+    BOOST_LOG(fatal) << "The PLANK Linux Host requires its CUDA-enabled product backends."sv;
+    return -1;
 #endif
 
     if (chosen_encoder == nullptr) {
@@ -4050,108 +3673,6 @@ namespace video {
 #endif
 
     return 0;
-  }
-
-  // Linux only declaration
-  /**
-   * @brief Callback signature for VA-API AVCodec hardware input initialization.
-   */
-  typedef int (*vaapi_init_avcodec_hardware_input_buffer_fn)(platf::avcodec_encode_device_t *encode_device, AVBufferRef **hw_device_buf);
-
-  /**
-   * @brief Initialize AVCodec hardware input buffers for VA-API.
-   */
-  util::Either<avcodec_buffer_t, int> vaapi_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
-    avcodec_buffer_t hw_device_buf;
-
-    // If an egl hwdevice
-    if (encode_device->data) {
-      if (((vaapi_init_avcodec_hardware_input_buffer_fn) encode_device->data)(encode_device, &hw_device_buf)) {
-        return -1;
-      }
-
-      return hw_device_buf;
-    }
-
-    auto render_device = platf::resolve_render_device();
-
-    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VAAPI, render_device.empty() ? nullptr : render_device.c_str(), nullptr, 0);
-    if (status < 0) {
-      char string[AV_ERROR_MAX_STRING_SIZE];
-      BOOST_LOG(error) << "Failed to create a VAAPI device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
-      return -1;
-    }
-
-    return hw_device_buf;
-  }
-
-#ifdef SUNSHINE_BUILD_VULKAN
-  using vulkan_init_avcodec_hardware_input_buffer_fn = int (*)(platf::avcodec_encode_device_t *encode_device, AVBufferRef **hw_device_buf);
-
-  util::Either<avcodec_buffer_t, int> vulkan_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
-    avcodec_buffer_t hw_device_buf;
-
-    if (encode_device && encode_device->data) {
-      if (((vulkan_init_avcodec_hardware_input_buffer_fn) encode_device->data)(encode_device, &hw_device_buf)) {
-        return -1;
-      }
-      return hw_device_buf;
-    }
-
-    // Try render device path first, auto-detecting the GPU with a connected display
-    auto render_device = platf::resolve_render_device();
-
-    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VULKAN, render_device.c_str(), nullptr, 0);
-    if (status >= 0) {
-      BOOST_LOG(info) << "Using Vulkan device: "sv << render_device;
-      return hw_device_buf;
-    }
-
-    // Fallback: try device indices for multi-GPU systems
-    const std::array<const char *, 4> devices = {"1", "0", "2", "3"};
-    for (auto device : devices) {
-      status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VULKAN, device, nullptr, 0);
-      if (status >= 0) {
-        BOOST_LOG(info) << "Using Vulkan device index: "sv << device;
-        return hw_device_buf;
-      }
-    }
-
-    BOOST_LOG(error) << "Failed to create a Vulkan device"sv;
-    return -1;
-  }
-#endif
-
-  /**
-   * @brief Initialize AVCodec hardware input buffers for CUDA.
-   */
-  util::Either<avcodec_buffer_t, int> cuda_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
-    avcodec_buffer_t hw_device_buf;
-
-    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 1 /* AV_CUDA_USE_PRIMARY_CONTEXT */);
-    if (status < 0) {
-      char string[AV_ERROR_MAX_STRING_SIZE];
-      BOOST_LOG(error) << "Failed to create a CUDA device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
-      return -1;
-    }
-
-    return hw_device_buf;
-  }
-
-  /**
-   * @brief Initialize AVCodec hardware input buffers for VideoToolbox.
-   */
-  util::Either<avcodec_buffer_t, int> vt_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
-    avcodec_buffer_t hw_device_buf;
-
-    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nullptr, nullptr, 0);
-    if (status < 0) {
-      char string[AV_ERROR_MAX_STRING_SIZE];
-      BOOST_LOG(error) << "Failed to create a VideoToolbox device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
-      return -1;
-    }
-
-    return hw_device_buf;
   }
 
 #ifdef _WIN32

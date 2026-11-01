@@ -41,11 +41,6 @@
   #include <AMF/components/VideoEncoderVCE.h>
 #endif
 
-#if !defined(__ANDROID__) && !defined(__APPLE__)
-  // For NVENC legacy constants
-  #include <ffnvcodec/nvEncodeAPI.h>
-#endif
-
 #if (defined(linux) || defined(__FreeBSD__)) && !defined(DOXYGEN)
   // For VAAPI rate control types
   #include <va/va.h>
@@ -484,81 +479,6 @@ namespace config {
 
   }  // namespace vaapi
 
-  namespace vt {
-
-    /**
-     * @brief Enumerates supported coder options.
-     */
-    enum coder_e : int {
-      _auto = 0,  ///< Auto
-      cabac,  ///< CABAC
-      cavlc  ///< CAVLC
-    };
-
-    /**
-     * @brief Parse an entropy-coder mode from configuration text.
-     *
-     * @param coder Entropy-coder mode selected in the configuration.
-     * @return Parsed enum value, or the setting-specific default when the text is unknown.
-     */
-    int coder_from_view(const std::string_view &coder) {
-      if (coder == "auto"sv) {
-        return _auto;
-      }
-      if (coder == "cabac"sv || coder == "ac"sv) {
-        return cabac;
-      }
-      if (coder == "cavlc"sv || coder == "vlc"sv) {
-        return cavlc;
-      }
-
-      return -1;
-    }
-
-    /**
-     * @brief Parse whether VideoToolbox software encoding is allowed.
-     *
-     * @param software Whether the software encoder path is being configured.
-     * @return Parsed enum value, or the setting-specific default when the text is unknown.
-     */
-    int allow_software_from_view(const std::string_view &software) {
-      if (software == "allowed"sv || software == "forced") {
-        return 1;
-      }
-
-      return 0;
-    }
-
-    /**
-     * @brief Parse whether VideoToolbox software encoding is forced.
-     *
-     * @param software Whether the software encoder path is being configured.
-     * @return Parsed enum value, or the setting-specific default when the text is unknown.
-     */
-    int force_software_from_view(const std::string_view &software) {
-      if (software == "forced") {
-        return 1;
-      }
-
-      return 0;
-    }
-
-    /**
-     * @brief Parse the VideoToolbox realtime encoder flag.
-     *
-     * @param rt Real-time encoder usage selector.
-     * @return Parsed enum value, or the setting-specific default when the text is unknown.
-     */
-    int rt_from_view(const std::string_view &rt) {
-      if (rt == "disabled" || rt == "off" || rt == "0") {
-        return 0;
-      }
-
-      return 1;
-    }
-
-  }  // namespace vt
-
   namespace sw {
     /**
      * @brief Parse an SVT-AV1 speed preset from configuration text.
@@ -724,7 +644,6 @@ namespace config {
     true,  // nv_realtime_hags
     true,  // nv_opengl_vulkan_on_dxgi
     true,  // nv_sunshine_high_power_mode
-    {},  // nv_legacy
 
     {
       qsv::medium,  // preset
@@ -749,24 +668,11 @@ namespace config {
     },  // amd
 
     {
-      0,
-      0,
-      1,
-      -1,
-    },  // vt
-
-    {
-      0,  // blbrc
       std::to_underlying(vaapi::quality_e::_auto),  // quality
       std::to_underlying(vaapi::rc_e::_auto),  // rate control
       {},  // rate control string
       false,  // strict_rc_buffer
     },  // vaapi
-
-    {
-      2,  // vk.tune (default: ll - low latency)
-      2,  // vk.rc_mode (default: cbr)
-    },
 
     {},  // adapter_name
 
@@ -1531,15 +1437,6 @@ namespace config {
     bool_f(vars, "nvenc_h264_cavlc", video.nv.h264_cavlc);
     generic_f(vars, "nvenc_split_encode", video.nv.split_frame_encoding, nv::split_encode_from_view);
 
-#if !defined(__ANDROID__) && !defined(__APPLE__)
-    video.nv_legacy.preset = video.nv.quality_preset + 11;
-    video.nv_legacy.multipass = video.nv.two_pass == nvenc::nvenc_two_pass::quarter_resolution ? NV_ENC_TWO_PASS_QUARTER_RESOLUTION :
-                                video.nv.two_pass == nvenc::nvenc_two_pass::full_resolution    ? NV_ENC_TWO_PASS_FULL_RESOLUTION :
-                                                                                                 NV_ENC_MULTI_PASS_DISABLED;
-    video.nv_legacy.h264_coder = video.nv.h264_cavlc ? NV_ENC_H264_ENTROPY_CODING_MODE_CAVLC : NV_ENC_H264_ENTROPY_CODING_MODE_CABAC;
-    video.nv_legacy.aq = video.nv.adaptive_quantization;
-    video.nv_legacy.vbv_percentage_increase = video.nv.vbv_percentage_increase;
-#endif
 
     string_f(vars, "adapter_name", video.adapter_name);
     double_between_f(vars, "minimum_fps_target", video.minimum_fps_target, {0.0, 1000.0});

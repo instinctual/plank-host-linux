@@ -66,14 +66,6 @@ namespace config {
     bool nv_sunshine_high_power_mode;  ///< Request NVIDIA high-power mode for Sunshine.
 
     struct {
-      int preset;
-      int multipass;
-      int h264_coder;
-      int aq;
-      int vbv_percentage_increase;
-    } nv_legacy;  ///< Legacy NVIDIA encoder options kept for config compatibility.
-
-    struct {
       std::optional<int> qsv_preset;
       std::optional<int> qsv_cavlc;
       bool qsv_slow_hevc;
@@ -96,24 +88,11 @@ namespace config {
     } amd;  ///< AMD AMF encoder options.
 
     struct {
-      int vt_allow_sw;
-      int vt_require_sw;
-      int vt_realtime;
-      int vt_coder;
-    } vt;  ///< VideoToolbox encoder options.
-
-    struct {
-      std::optional<int> blbrc;
       std::optional<int> vaapi_quality;
       std::optional<int> vaapi_rc;
       std::string vaapi_rc_str;
       bool strict_rc_buffer;
     } vaapi;  ///< VA-API encoder options.
-
-    struct {
-      int tune;  // 0=default, 1=hq, 2=ll, 3=ull, 4=lossless
-      int rc_mode;  // 0=driver, 1=cqp, 2=cbr, 4=vbr
-    } vk;  ///< Vulkan encoder options.
 
     std::string adapter_name;  ///< Display adapter name selected in configuration.
 
