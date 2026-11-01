@@ -452,28 +452,18 @@ namespace video {
 
   };
 
-  // encoders
-  extern encoder_t software;
+  // Product encoder descriptors exposed for hardware qualification.
 #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
   extern encoder_t software_cuda;
-#endif
-
-#if !defined(__APPLE__)
-  extern encoder_t nvenc;  // available for windows and linux
+  extern encoder_t nvenc_direct;
 #endif
 
 #ifdef _WIN32
+  extern encoder_t software;
+  extern encoder_t nvenc;
   extern encoder_t amdvce;
   extern encoder_t quicksync;
   extern encoder_t mediafoundation;
-#endif
-
-#if defined(__linux__) || defined(linux) || defined(__linux) || defined(__FreeBSD__)
-  extern encoder_t vaapi;
-#endif
-
-#ifdef __APPLE__
-  extern encoder_t videotoolbox;
 #endif
 
   /**

@@ -190,11 +190,14 @@ TEST(VideoColorspaceTest, IdentityGbrCudaKernelProducesExact10BitPlanes) {
 }
 #endif
 
+#if defined(_WIN32) || (defined(__linux__) && defined(SUNSHINE_BUILD_CUDA))
 struct EncoderTest: PlatformTestSuite, testing::WithParamInterface<video::encoder_t *> {
   void SetUp() override {
     BaseTest::SetUp();
     auto &encoder = *GetParam();
-    if (!video::validate_encoder(encoder, false)) {
+    // Use the same codec eligibility as the product's backend probes.
+    const bool probe_hevc = encoder.name == "nvenc-direct";
+    if (!video::validate_encoder(encoder, false, probe_hevc, false)) {
       // Encoder failed validation,
       // if it's software - fail, otherwise skip
       if (encoder.name == "software") {
@@ -210,23 +213,15 @@ INSTANTIATE_TEST_SUITE_P(
   EncoderVariants,
   EncoderTest,
   testing::Values(
-#if !defined(__APPLE__)
-    &video::nvenc,
-#endif
 #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
     &video::software_cuda,
-#endif
-#ifdef _WIN32
+    &video::nvenc_direct
+#elif defined(_WIN32)
+    &video::nvenc,
     &video::amdvce,
     &video::quicksync,
-#endif
-#if defined(__linux__) || defined(__FreeBSD__)
-    &video::vaapi,
-#endif
-#ifdef __APPLE__
-    &video::videotoolbox,
-#endif
     &video::software
+#endif
   ),
   [](const auto &info) {
     auto name = std::string(info.param->name);
@@ -243,6 +238,7 @@ TEST_P(EncoderTest, ValidateEncoder) {
   }
 #endif
 }
+#endif
 
 /**
  * @brief Parameterized coverage for effective H.264 profile selection.
