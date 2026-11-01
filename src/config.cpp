@@ -674,6 +674,10 @@ namespace config {
       false,  // strict_rc_buffer
     },  // vaapi
 
+    {
+      2,  // vk.rc_mode (cbr)
+    },
+
     {},  // adapter_name
 
     {

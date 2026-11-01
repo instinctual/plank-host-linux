@@ -94,6 +94,10 @@ namespace config {
       bool strict_rc_buffer;
     } vaapi;  ///< VA-API encoder options.
 
+    struct {
+      int rc_mode;  ///< Rate-control mode consumed by the shared Vulkan conversion helper.
+    } vk;  ///< Shared Vulkan helper options; not a PLANK encoder selection.
+
     std::string adapter_name;  ///< Display adapter name selected in configuration.
 
     /**
