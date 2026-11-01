@@ -1349,7 +1349,7 @@ namespace video {
       nullptr
     ),
     {
-      // libsvtav1 takes different presets than libx264/libx265.
+      // libsvtav1 takes different presets than libx264.
       // We set an infinite GOP length, use a low delay prediction structure,
       // force I frames to be key frames, and set max bitrate to default to work
       // around a FFmpeg bug with CBR mode.
@@ -1372,24 +1372,7 @@ namespace video {
       {},
 #endif
     },
-    {
-      // x265's Info SEI is so long that it causes the IDR picture data to be
-      // kicked to the 2nd packet in the frame, breaking Moonlight's parsing logic.
-      // It also looks like gop_size isn't passed on to x265, so we have to set
-      // 'keyint=-1' in the parameters ourselves.
-      {
-        {"forced-idr"s, 1},
-        {"x265-params"s, "info=0:keyint=-1"s},
-        {"preset"s, &config::video.sw.sw_preset},
-        {"tune"s, &config::video.sw.sw_tune},
-      },
-      {},  // SDR-specific options
-      {},  // HDR-specific options
-      {},  // YUV444 SDR-specific options
-      {},  // YUV444 HDR-specific options
-      {},  // Fallback options
-      "libx265"s,
-    },
+    {},  // Software HEVC is not a PLANK encoder backend.
     {
       // Common options
       {
@@ -2662,11 +2645,9 @@ namespace video {
           // rate. This permits a short peak after a hard cut without raising
           // the stream's sustained bandwidth target.
           ctx->rc_buffer_size = sw_rate_control.buffer_size;
-        } else if (!hardware && (ctx->slices > 1 || config.videoFormat == 1)) {
+        } else if (!hardware && ctx->slices > 1) {
           // Use a larger rc_buffer_size for software encoding when slices are enabled,
           // because libx264 can severely degrade quality if the buffer is too small.
-          // libx265 encounters this issue more frequently, so always scale the
-          // buffer by 1.5x for software HEVC encoding.
           ctx->rc_buffer_size = bitrate / ((config.framerate * 10) / 15);
         } else {
           ctx->rc_buffer_size = bitrate / config.framerate;
