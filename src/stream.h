@@ -13,7 +13,6 @@
 
 // local includes
 #include "audio.h"
-#include "crypto.h"
 #include "video.h"
 
 namespace stream {

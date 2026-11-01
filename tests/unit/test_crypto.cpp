@@ -3,24 +3,29 @@
  * @brief Test src/crypto.*.
  */
 // test imports
-#include "../tests_common.h"
+#include <gtest/gtest.h>
 
 // lib imports
+#include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <src/utility.h>
 
 // local imports
 #include <src/crypto.h>
 
-TEST(CryptoTest, GeneratedCredentialsExposeSubjectAndVerifySignatures) {
-  constexpr std::string_view common_name = "Sunshine Test Host";
-  constexpr std::string_view payload = "payload";
+TEST(CryptoTest, GeneratedCredentialsHaveMatchingKeyAndValidSelfSignature) {
+  constexpr std::string_view common_name = "PLANK Test Host";
 
   auto creds = crypto::gen_creds(common_name, 2048);
   ASSERT_FALSE(creds.x509.empty());
   ASSERT_FALSE(creds.pkey.empty());
 
-  auto cert = crypto::x509(creds.x509);
-  auto pkey = crypto::pkey(creds.pkey);
+  util::safe_ptr<BIO, BIO_free_all> cert_pem {BIO_new_mem_buf(creds.x509.data(), creds.x509.size())};
+  util::safe_ptr<BIO, BIO_free_all> key_pem {BIO_new_mem_buf(creds.pkey.data(), creds.pkey.size())};
+  ASSERT_NE(cert_pem.get(), nullptr);
+  ASSERT_NE(key_pem.get(), nullptr);
+  util::safe_ptr<X509, X509_free> cert {PEM_read_bio_X509(cert_pem.get(), nullptr, nullptr, nullptr)};
+  util::safe_ptr<EVP_PKEY, EVP_PKEY_free> pkey {PEM_read_bio_PrivateKey(key_pem.get(), nullptr, nullptr, nullptr)};
   ASSERT_NE(cert.get(), nullptr);
   ASSERT_NE(pkey.get(), nullptr);
 
@@ -42,9 +47,9 @@ TEST(CryptoTest, GeneratedCredentialsExposeSubjectAndVerifySignatures) {
   };
   ASSERT_EQ(parsed_common_name, common_name);
 
-  ASSERT_FALSE(crypto::signature(cert).empty());
-
-  const auto signature = crypto::sign256(pkey, payload);
-  ASSERT_FALSE(signature.empty());
-  ASSERT_TRUE(crypto::verify256(cert, payload, {reinterpret_cast<const char *>(signature.data()), signature.size()}));
+  ASSERT_EQ(X509_check_private_key(cert.get(), pkey.get()), 1);
+  ASSERT_EQ(X509_verify(cert.get(), pkey.get()), 1);
+  ASSERT_EQ(EVP_PKEY_get_bits(pkey.get()), 2048);
+  ASSERT_LT(X509_cmp_current_time(X509_get0_notBefore(cert.get())), 0);
+  ASSERT_GT(X509_cmp_current_time(X509_get0_notAfter(cert.get())), 0);
 }
