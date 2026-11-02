@@ -231,7 +231,6 @@ namespace NVENC_NAMESPACE {
     const ::nvenc::nvenc_config &config,
     const video::config_t &client_config
   ) const {
-#if NVENC_SDK_VERSION >= 1300
     if (client_config.videoFormat <= 0 || get_encoder_cap(init_params.encodeGUID, NV_ENC_CAPS_NUM_ENCODER_ENGINES) <= 1) {
       return;
     }
@@ -244,11 +243,6 @@ namespace NVENC_NAMESPACE {
     } else {
       init_params.splitEncodeMode = NV_ENC_SPLIT_AUTO_MODE;
     }
-#else
-    if (config.split_frame_encoding == ::nvenc::nvenc_split_frame_encoding::force_enabled) {
-      BOOST_LOG(warning) << "NvEnc: split-frame encoding requires NVENC API 13.0; ignoring forced mode";
-    }
-#endif
   }
 
   void nvenc_base::configure_rate_control(
@@ -343,13 +337,11 @@ namespace NVENC_NAMESPACE {
     if constexpr (requires { format_config.outputRecoveryPointSEI; }) {
       format_config.outputRecoveryPointSEI = 1;
     }
-#if NVENC_SDK_VERSION >= 1200
     if (get_encoder_cap(encode_guid, NV_ENC_CAPS_SINGLE_SLICE_INTRA_REFRESH)) {
       format_config.singleSliceIntraRefresh = 1;
     } else {
       BOOST_LOG(warning) << "NvEnc: Single Slice Intra Refresh not supported";
     }
-#endif
   }
 
   void nvenc_base::configure_h264(
@@ -402,12 +394,8 @@ namespace NVENC_NAMESPACE {
     }
     format_config.enableFillerDataInsertion = config.insert_filler_data;
     if (buffer_is_10bit(buffer_format)) {
-#if NVENC_SDK_VERSION >= 1300
       format_config.inputBitDepth = NV_ENC_BIT_DEPTH_10;
       format_config.outputBitDepth = NV_ENC_BIT_DEPTH_10;
-#else
-      format_config.pixelBitDepthMinus8 = 2;
-#endif
     }
     configure_reference_frames(format_config.maxNumRefFramesInDPB, format_config.numRefL0, 8, client_config.numRefFrames, encode_guid);
 
@@ -420,7 +408,6 @@ namespace NVENC_NAMESPACE {
     configure_h264_hevc_metadata(format_config, client_config, colorspace, buffer_format, encode_guid);
   }
 
-#if NVENC_SDK_VERSION >= 1200
   void nvenc_base::configure_av1(
     NV_ENC_CONFIG &enc_config,
     const ::nvenc::nvenc_config &config,
@@ -437,13 +424,8 @@ namespace NVENC_NAMESPACE {
     }
     format_config.enableBitstreamPadding = config.insert_filler_data;
     if (buffer_is_10bit(buffer_format)) {
-  #if NVENC_SDK_VERSION >= 1300
       format_config.inputBitDepth = NV_ENC_BIT_DEPTH_10;
       format_config.outputBitDepth = NV_ENC_BIT_DEPTH_10;
-  #else
-      format_config.inputPixelBitDepthMinus8 = 2;
-      format_config.pixelBitDepthMinus8 = 2;
-  #endif
     }
     format_config.colorPrimaries = colorspace.primaries;
     format_config.transferCharacteristics = colorspace.tranfer_function;
@@ -463,7 +445,6 @@ namespace NVENC_NAMESPACE {
       format_config.numTileColumns = std::pow(2, std::floor(std::log2(client_config.slicesPerFrame) / 2));
     }
   }
-#endif
 
   void nvenc_base::configure_codec(
     NV_ENC_CONFIG &enc_config,
@@ -480,11 +461,9 @@ namespace NVENC_NAMESPACE {
       case 1:
         configure_hevc(enc_config, config, client_config, colorspace, buffer_format, encode_guid);
         break;
-#if NVENC_SDK_VERSION >= 1200
       case 2:
         configure_av1(enc_config, config, client_config, colorspace, buffer_format, encode_guid);
         break;
-#endif
     }
   }
 
@@ -549,7 +528,6 @@ namespace NVENC_NAMESPACE {
     if (config.insert_filler_data) {
       extra += " filler-data";
     }
-#if NVENC_SDK_VERSION >= 1300
     if (client_config.videoFormat > 0 && get_encoder_cap(init_params.encodeGUID, NV_ENC_CAPS_NUM_ENCODER_ENGINES) > 1) {
       if (init_params.splitEncodeMode == NV_ENC_SPLIT_AUTO_MODE) {
         extra += " sfe-auto";
@@ -557,7 +535,6 @@ namespace NVENC_NAMESPACE {
         extra += " sfe";
       }
     }
-#endif
 
     BOOST_LOG(info) << "NvEnc: created encoder v" << NVENC_SDK_VERSION << " "
                     << video_format_name(client_config.videoFormat)
@@ -619,11 +596,9 @@ namespace NVENC_NAMESPACE {
       case 1:
         init_params.encodeGUID = NV_ENC_CODEC_HEVC_GUID;
         break;
-#if NVENC_SDK_VERSION >= 1200
       case 2:
         init_params.encodeGUID = NV_ENC_CODEC_AV1_GUID;
         break;
-#endif
       default:
         BOOST_LOG(error) << "NvEnc: unknown video format " << client_config.videoFormat;
         return false;

@@ -274,9 +274,7 @@ namespace platf {
    */
   enum class mem_type_e {
     system,  ///< System memory
-    dxgi,  ///< DXGI
     cuda,  ///< CUDA
-    videotoolbox,  ///< VideoToolbox
     unknown  ///< Unknown
   };
 

@@ -218,13 +218,6 @@ namespace video {
   }
 
   /**
-   * @brief Create an FFmpeg hardware device buffer for D3D11VA input.
-   *
-   * @param encode_device Encode device.
-   * @return Hardware buffer on success, or an error code on failure.
-   */
-  util::Either<avcodec_buffer_t, int> dxgi_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *);
-  /**
    * @brief FFmpeg software encode device used when no hardware frames are required.
    */
   class avcodec_software_encode_device_t: public platf::avcodec_encode_device_t {
@@ -3234,14 +3227,10 @@ namespace video {
    */
   platf::mem_type_e map_base_dev_type(AVHWDeviceType type) {
     switch (type) {
-      case AV_HWDEVICE_TYPE_D3D11VA:
-        return platf::mem_type_e::dxgi;
       case AV_HWDEVICE_TYPE_CUDA:
         return platf::mem_type_e::cuda;
       case AV_HWDEVICE_TYPE_NONE:
         return platf::mem_type_e::system;
-      case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
-        return platf::mem_type_e::videotoolbox;
       default:
         return platf::mem_type_e::unknown;
     }

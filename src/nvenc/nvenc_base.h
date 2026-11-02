@@ -263,7 +263,6 @@ namespace NVENC_NAMESPACE {
       const GUID &encode_guid
     );
 
-#if NVENC_SDK_VERSION >= 1200
     /**
      * @brief Configure AV1 codec options.
      *
@@ -282,7 +281,6 @@ namespace NVENC_NAMESPACE {
       NV_ENC_BUFFER_FORMAT buffer_format,
       const GUID &encode_guid
     );
-#endif
 
     /**
      * @brief Configure codec-specific encoder options.
