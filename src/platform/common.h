@@ -14,9 +14,7 @@
 
 // lib includes
 #include <boost/core/noncopyable.hpp>
-#ifndef _WIN32
   #include <boost/asio.hpp>
-#endif
 
 // local includes
 #include "src/config.h"
@@ -38,32 +36,6 @@ struct AVHWFramesContext;
 struct AVCodecContext;
 struct AVDictionary;
 
-#ifdef _WIN32
-// Forward declarations of boost classes to avoid having to include boost headers
-// here, which results in issues with Windows.h and WinSock2.h include order.
-namespace boost {
-  namespace asio {
-    namespace ip {
-      class address;
-    }  // namespace ip
-  }  // namespace asio
-
-  namespace filesystem {
-    class path;
-  }
-
-  namespace process::v1 {
-    class child;
-    class group;
-    template<typename Char>
-    class basic_environment;
-    /**
-     * @brief Map of environment variable names to values.
-     */
-    typedef basic_environment<char> environment;
-  }  // namespace process::v1
-}  // namespace boost
-#endif
 namespace video {
   struct config_t;
 }  // namespace video

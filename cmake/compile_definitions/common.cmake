@@ -31,11 +31,6 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(Apple)?Clang$")
     # Clang doesn't actually complain about this this, so disabling for now
     # list(APPEND SUNSHINE_COMPILE_OPTIONS -Wno-uninitialized)
 
-    # Some libc++ versions on FreeBSD guard std::jthread behind this flag.
-    if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-        list(APPEND SUNSHINE_COMPILE_OPTIONS -fexperimental-library)
-        list(APPEND SUNSHINE_LINK_OPTIONS -fexperimental-library)
-    endif()
 endif()
 if(BUILD_WERROR)
     list(APPEND SUNSHINE_COMPILE_OPTIONS -Werror)
@@ -47,13 +42,8 @@ if(NOT SUNSHINE_ASSETS_DIR)
 endif()
 
 # platform specific compile definitions
-if(WIN32)
-    include(${CMAKE_MODULE_PATH}/compile_definitions/windows.cmake)
-elseif(UNIX)
-    include(${CMAKE_MODULE_PATH}/compile_definitions/unix.cmake)
-
-    include(${CMAKE_MODULE_PATH}/compile_definitions/linux.cmake)
-endif()
+include(${CMAKE_MODULE_PATH}/compile_definitions/unix.cmake)
+include(${CMAKE_MODULE_PATH}/compile_definitions/linux.cmake)
 
 # libvirtualhid
 add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
@@ -67,53 +57,17 @@ if(EXTERNAL_PROJECT_LIBEVDEV_USED AND TARGET libvirtualhid)
     add_dependencies(libvirtualhid libevdev)
 endif()
 
+set(NV_CODEC_HEADERS_13_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/third-party/build-deps/third-party/FFmpeg/nv-codec-headers/include")
+
 set(NVENC_PUBLIC_SOURCES
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_config.h"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_cuda_factory.h"
-        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_interface.h"
-        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory.cpp"
-        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory.h"
-        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory_versions.h"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_encoded_frame.h"
         "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_encoder.h"
-        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_shared_dll.h"
-        "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_version.h"
 )
 set(NVENC_SOURCES ${NVENC_PUBLIC_SOURCES})
 
-if(WIN32)
-    set(NVENC_IMPLEMENTATION_SOURCES
-            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_base.cpp"
-            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11.cpp"
-            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_native.cpp"
-            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_on_cuda.cpp"
-            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_dynamic_factory_impl.cpp"
-            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_utils.cpp"
-    )
-
-    # Add a version-isolated NVENC implementation object library.
-    # add_nvenc_sdk_implementation: args = `target_name`, `sdk_version`, `sdk_include_dir`
-    function(add_nvenc_sdk_implementation target_name sdk_version sdk_include_dir)
-        add_library(${target_name} OBJECT ${NVENC_IMPLEMENTATION_SOURCES})
-        target_include_directories(${target_name} BEFORE PRIVATE "${sdk_include_dir}")
-        target_compile_definitions(${target_name} PRIVATE
-                NVENC_FACTORY_SUFFIX=${sdk_version}
-                NVENC_NAMESPACE=nvenc_${sdk_version}
-                NVENC_SDK_VERSION=${sdk_version}
-        )
-        target_compile_options(${target_name} PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
-    endfunction()
-
-    add_nvenc_sdk_implementation(nvenc_sdk_1100 1100 "${NV_CODEC_HEADERS_11_INCLUDE_DIR}")
-    add_nvenc_sdk_implementation(nvenc_sdk_1200 1200 "${NV_CODEC_HEADERS_12_INCLUDE_DIR}")
-    add_nvenc_sdk_implementation(nvenc_sdk_1300 1300 "${NV_CODEC_HEADERS_13_INCLUDE_DIR}")
-
-    list(APPEND NVENC_SOURCES
-            $<TARGET_OBJECTS:nvenc_sdk_1100>
-            $<TARGET_OBJECTS:nvenc_sdk_1200>
-            $<TARGET_OBJECTS:nvenc_sdk_1300>
-    )
-elseif(CUDA_FOUND)
+if(CUDA_FOUND)
     # Linux currently consumes the prepared API 13 headers used by the
     # qualified NVIDIA driver baseline. Build the platform-neutral standalone
     # NVENC core here so the CUDA input adapter can use reference-picture
@@ -222,14 +176,7 @@ include_directories(
         ${Boost_INCLUDE_DIRS}
 )
 
-if(WIN32)
-    include_directories(BEFORE SYSTEM "${NV_CODEC_HEADERS_13_INCLUDE_DIR}")
-else()
-    include_directories(
-            BEFORE SYSTEM
-            "${CMAKE_SOURCE_DIR}/third-party/build-deps/third-party/FFmpeg/nv-codec-headers/include"
-    )
-endif()
+include_directories(BEFORE SYSTEM "${NV_CODEC_HEADERS_13_INCLUDE_DIR}")
 
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
         ${CMAKE_THREAD_LIBS_INIT}

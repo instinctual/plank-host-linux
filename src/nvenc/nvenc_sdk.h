@@ -31,18 +31,13 @@
 #include <cstddef>
 #include <cstdint>
 
-#ifndef _WIN32
   // nvEncodeAPI.h includes these C headers itself. Load them in the global
   // namespace first so version-isolating the SDK declarations below does not
   // accidentally place libc and libstdc++ declarations in NVENC_NAMESPACE.
   #include <stddef.h>
   #include <stdint.h>
   #include <stdlib.h>
-#endif
 
-#ifdef _WIN32
-  #include <Windows.h>
-#endif
 
 // The version-specific namespace is populated by the SDK headers included below.
 namespace NVENC_NAMESPACE {  // NOSONAR(cpp:S3261)

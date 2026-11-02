@@ -17,7 +17,4 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PATTERN "shaders" EXCLUDE)
     file(CREATE_LINK "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/shaders"
             "${CMAKE_BINARY_DIR}/assets/shaders" COPY_ON_ERROR SYMBOLIC)
-elseif(WIN32)
-    file(COPY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/assets/"
-            DESTINATION "${CMAKE_BINARY_DIR}/assets")
 endif()

@@ -336,15 +336,10 @@ namespace NVENC_NAMESPACE {
       return;
     }
     format_config.enableIntraRefresh = 1;
-#ifdef _WIN32
-    format_config.intraRefreshPeriod = 300;
-    format_config.intraRefreshCnt = 299;
-#else
     // Qualified PLANK Linux profile: one refresh wave each second,
     // spread over half a second at 60 fps.
     format_config.intraRefreshPeriod = 60;
     format_config.intraRefreshCnt = 30;
-#endif
     if constexpr (requires { format_config.outputRecoveryPointSEI; }) {
       format_config.outputRecoveryPointSEI = 1;
     }
@@ -414,11 +409,7 @@ namespace NVENC_NAMESPACE {
       format_config.pixelBitDepthMinus8 = 2;
 #endif
     }
-#ifdef _WIN32
-    configure_reference_frames(format_config.maxNumRefFramesInDPB, format_config.numRefL0, 5, client_config.numRefFrames, encode_guid);
-#else
     configure_reference_frames(format_config.maxNumRefFramesInDPB, format_config.numRefL0, 8, client_config.numRefFrames, encode_guid);
-#endif
 
     if (config.enable_min_qp) {
       enc_config.rcParams.enableMinQP = 1;
@@ -646,11 +637,7 @@ namespace NVENC_NAMESPACE {
     }
 
     init_params.presetGUID = quality_preset_guid_from_number(config.quality_preset);
-#ifdef _WIN32
-    init_params.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
-#else
     init_params.tuningInfo = NV_ENC_TUNING_INFO_LOW_LATENCY;
-#endif
     init_params.enablePTD = 1;
     init_params.enableEncodeAsync = async_event_handle ? 1 : 0;
     init_params.enableWeightedPrediction = config.weighted_prediction &&

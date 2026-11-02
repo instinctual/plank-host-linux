@@ -76,28 +76,13 @@ namespace video {
     std::string encoder_backend;  ///< Exact PLANK encoder backend selected for this session.
   };
 
-  namespace amf {
-
-    /**
-     * @brief Enumerates supported coder options for the AMF encoder.
-     */
-    enum class coder_e : int {
-      auto_ = 0,  ///< Select the coder based on the H.264 profile.
-      cabac = 1,  ///< CABAC entropy coding.
-      cavlc = 2,  ///< CAVLC entropy coding.
-    };
-
-  }  // namespace amf
-
   /**
    * @brief Select the effective FFmpeg H.264 profile for an encoder configuration.
    *
-   * @param encoder_name FFmpeg encoder name selected for the stream.
    * @param config Encoding configuration requested by the remote client.
-   * @param amd_coder Configured AMF entropy-coder value.
    * @return FFmpeg H.264 profile applied to the codec context.
    */
-  int select_h264_profile(std::string_view encoder_name, const config_t &config, int amd_coder);
+  int select_h264_profile(const config_t &config);
 
   /**
    * @brief Decide whether an FFmpeg software H.264 session should use packed native RGB input.
@@ -458,13 +443,6 @@ namespace video {
   extern encoder_t nvenc_direct;
 #endif
 
-#ifdef _WIN32
-  extern encoder_t software;
-  extern encoder_t nvenc;
-  extern encoder_t amdvce;
-  extern encoder_t quicksync;
-  extern encoder_t mediafoundation;
-#endif
 
   /**
    * @brief Encoded packet wrapper used by the streaming pipeline.

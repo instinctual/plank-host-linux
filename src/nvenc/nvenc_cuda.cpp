@@ -2,7 +2,6 @@
  * @file src/nvenc/nvenc_cuda.cpp
  * @brief Linux CUDA input adapter for standalone NVENC.
  */
-#ifndef _WIN32
 
 #include "nvenc_cuda.h"
 
@@ -74,4 +73,3 @@ namespace NVENC_NAMESPACE {
   }
 
 }  // namespace NVENC_NAMESPACE
-#endif

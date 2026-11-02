@@ -10,29 +10,6 @@
 
 namespace NVENC_NAMESPACE {
 
-#ifdef _WIN32
-  /**
-   * @brief Convert an NVENC buffer format to the matching DXGI format.
-   */
-  DXGI_FORMAT dxgi_format_from_nvenc_format(NV_ENC_BUFFER_FORMAT format) {
-    switch (format) {
-      case NV_ENC_BUFFER_FORMAT_YUV420_10BIT:
-        return DXGI_FORMAT_P010;
-
-      case NV_ENC_BUFFER_FORMAT_NV12:
-        return DXGI_FORMAT_NV12;
-
-      case NV_ENC_BUFFER_FORMAT_AYUV:
-        return DXGI_FORMAT_AYUV;
-
-      case NV_ENC_BUFFER_FORMAT_YUV444_10BIT:
-        return DXGI_FORMAT_R16_UINT;
-
-      default:
-        return DXGI_FORMAT_UNKNOWN;
-    }
-  }
-#endif
 
   /**
    * @brief Convert a Sunshine pixel format to the matching NVENC buffer format.

@@ -37,20 +37,6 @@ namespace args {
    */
   int version();
 
-#ifdef _WIN32
-  /**
-   * @brief Restore global NVIDIA control panel settings.
-   * If Sunshine was improperly terminated, this function restores
-   * the global NVIDIA control panel settings to the undo file left
-   * by Sunshine. This function is typically called by the uninstaller.
-   * @examples
-   * restore_nvprefs_undo();
-   * @examples_end
-   *
-   * @return Process exit code from restoring NVIDIA profile preferences.
-   */
-  int restore_nvprefs_undo();
-#endif
 }  // namespace args
 
 /**
@@ -84,37 +70,3 @@ namespace lifetime {
  * @brief Log the publisher metadata provided from CMake.
  */
 void log_publisher_data();
-
-#ifdef _WIN32
-/**
- * @brief Check if NVIDIA's GameStream software is running.
- * @return `true` if GameStream is enabled, `false` otherwise.
- */
-bool is_gamestream_enabled();
-
-/**
- * @brief Namespace for controlling the Sunshine service model on Windows.
- */
-namespace service_ctrl {
-  /**
-   * @brief Check if the service is running.
-   * @examples
-   * is_service_running();
-   * @examples_end
-   *
-   * @return True when the requested service or UI readiness condition is satisfied.
-   */
-  bool is_service_running();
-
-  /**
-   * @brief Start the service and wait for startup to complete.
-   * @examples
-   * start_service();
-   * @examples_end
-   *
-   * @return True when the requested service or UI readiness condition is satisfied.
-   */
-  bool start_service();
-
-}  // namespace service_ctrl
-#endif

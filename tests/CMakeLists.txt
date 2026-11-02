@@ -68,12 +68,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # modify SUNSHINE_DEFINITIONS
-if (WIN32)
-    list(APPEND
-            SUNSHINE_DEFINITIONS SUNSHINE_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src_assets/windows/assets/shaders/directx")
-elseif (NOT APPLE)
-    list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src_assets/linux/assets/shaders/opengl")
-endif ()
+list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src_assets/linux/assets/shaders/opengl")
 
 set(TEST_DEFINITIONS)  # list will be appended as needed
 
@@ -87,7 +82,7 @@ list(APPEND TEST_DEFINITIONS SUNSHINE_TEST_BIN_DIR="${CMAKE_CURRENT_BINARY_DIR}"
 list(FILTER SUNSHINE_DEFINITIONS EXCLUDE REGEX "^SUNSHINE_ASSETS_DIR=")
 list(APPEND TEST_DEFINITIONS SUNSHINE_ASSETS_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_assets")
 
-if(NOT WIN32)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Udev 255)  # we need 255+ for udevadm verify
     message(STATUS "UDEV_FOUND: ${UDEV_FOUND}")
     if(UDEV_FOUND)
@@ -98,12 +93,6 @@ endif()
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_SOURCE_DIR}/tests/*.h
         ${CMAKE_SOURCE_DIR}/tests/*.cpp)
-# Add macOS-specific test files only when building tests for macOS
-if (APPLE)
-    file(GLOB_RECURSE MACOS_TEST_SOURCES CONFIGURE_DEPENDS
-            ${CMAKE_SOURCE_DIR}/tests/*.mm)
-    list(APPEND TEST_SOURCES ${MACOS_TEST_SOURCES})
-endif ()
 
 set(SUNSHINE_SOURCES
         ${SUNSHINE_TARGET_FILES})
@@ -167,19 +156,3 @@ if(PLANK_ENABLE_TRANSPORT)
     set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
             "${PLANK_TRANSPORT_LIBRARY}")
 endif()
-
-if (WIN32)
-    # Prefer static libraries because the Windows package is linked statically.
-    set_target_properties(${PROJECT_NAME} PROPERTIES LINK_SEARCH_START_STATIC 1)
-
-    # Copy minhook-detours DLL to test binary directory for ARM64
-    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64" AND DEFINED _MINHOOK_DLL)
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_MINHOOK_DLL}"
-                "${CMAKE_CURRENT_BINARY_DIR}"
-            COMMENT "Copying minhook-detours DLL to test binary directory"
-            VERBATIM
-        )
-    endif()
-endif ()

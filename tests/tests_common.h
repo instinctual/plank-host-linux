@@ -122,11 +122,7 @@ namespace test_utils {
   } while (0)
 
 // Platform detection macros for convenience
-#ifdef _WIN32
-  #define IS_WINDOWS true
-#else
-  #define IS_WINDOWS false
-#endif
+#define IS_WINDOWS false
 
 #ifdef __linux__
   #define IS_LINUX true

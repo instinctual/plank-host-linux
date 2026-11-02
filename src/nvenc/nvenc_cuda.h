@@ -4,7 +4,6 @@
  */
 #pragma once
 
-#ifndef _WIN32
 
 #include "nvenc_base.h"
 #include "nvenc_cuda_factory.h"
@@ -26,4 +25,3 @@ namespace NVENC_NAMESPACE {
   };
 
 }  // namespace NVENC_NAMESPACE
-#endif

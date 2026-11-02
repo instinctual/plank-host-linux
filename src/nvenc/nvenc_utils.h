@@ -5,9 +5,6 @@
 #pragma once
 
 // plafform includes
-#ifdef _WIN32
-  #include <dxgiformat.h>
-#endif
 
 // local includes
 #include "nvenc_colorspace.h"
@@ -17,15 +14,6 @@
 
 namespace NVENC_NAMESPACE {
 
-#ifdef _WIN32
-  /**
-   * @brief Convert an NVENC buffer format to the matching DXGI format.
-   *
-   * @param format Pixel, audio, or protocol format being converted.
-   * @return DXGI texture format that matches the NVENC buffer format.
-   */
-  DXGI_FORMAT dxgi_format_from_nvenc_format(NV_ENC_BUFFER_FORMAT format);
-#endif
 
   /**
    * @brief Convert a Sunshine pixel format to the matching NVENC buffer format.

@@ -7,11 +7,7 @@ foreach(dep ${SUNSHINE_TARGET_DEPENDENCIES})
 endforeach()
 
 # platform specific target definitions
-if(WIN32)
-    include(${CMAKE_MODULE_PATH}/targets/windows.cmake)
-elseif(UNIX)
-    include(${CMAKE_MODULE_PATH}/targets/linux.cmake)
-endif()
+include(${CMAKE_MODULE_PATH}/targets/linux.cmake)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_library(PLANK_SYSTEMD_LIBRARY NAMES systemd REQUIRED)
@@ -134,41 +130,8 @@ if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# custom compile flags, must be after adding tests
-
-if (NOT BUILD_TESTS)
-    set(TEST_DIR "")
-else()
-    set(TEST_DIR "${CMAKE_SOURCE_DIR}/tests")
-endif()
-
-# third-party/ViGEmClient
-set(VIGEM_COMPILE_FLAGS "")
-string(APPEND VIGEM_COMPILE_FLAGS "-Wno-unknown-pragmas ")
-string(APPEND VIGEM_COMPILE_FLAGS "-Wno-misleading-indentation ")
-string(APPEND VIGEM_COMPILE_FLAGS "-Wno-class-memaccess ")
-string(APPEND VIGEM_COMPILE_FLAGS "-Wno-unused-function ")
-string(APPEND VIGEM_COMPILE_FLAGS "-Wno-unused-variable ")
-set_source_files_properties("${CMAKE_SOURCE_DIR}/third-party/ViGEmClient/src/ViGEmClient.cpp"
-        DIRECTORY "${CMAKE_SOURCE_DIR}" "${TEST_DIR}"
-        PROPERTIES
-        COMPILE_DEFINITIONS "UNICODE=1;ERROR_INVALID_DEVICE_OBJECT_PARAMETER=650"
-        COMPILE_FLAGS ${VIGEM_COMPILE_FLAGS})
-
-# src/nvhttp
+# Release assertions are disabled independently of test compilation.
 string(TOUPPER "x${CMAKE_BUILD_TYPE}" BUILD_TYPE)
-if("${BUILD_TYPE}" STREQUAL "XDEBUG")
-    if(WIN32)
-        if (NOT BUILD_TESTS)
-            set_source_files_properties("${CMAKE_SOURCE_DIR}/src/nvhttp.cpp"
-                    DIRECTORY "${CMAKE_SOURCE_DIR}"
-                    PROPERTIES COMPILE_FLAGS -O2)
-        else()
-            set_source_files_properties("${CMAKE_SOURCE_DIR}/src/nvhttp.cpp"
-                    DIRECTORY "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/tests"
-                    PROPERTIES COMPILE_FLAGS -O2)
-        endif()
-    endif()
-else()
+if(NOT "${BUILD_TYPE}" STREQUAL "XDEBUG")
     add_definitions(-DNDEBUG)
 endif()

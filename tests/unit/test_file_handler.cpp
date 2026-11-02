@@ -100,7 +100,6 @@ TEST(FileHandlerTests, ReadMissingFileTest) {
   EXPECT_EQ(file_handler::read_file("non-existing-file.txt"), "");
 }
 
-#ifndef _WIN32
 TEST(FileHandlerTests, WriteFileSetsPermissionsAtCreation) {
   const std::string file_name = "private_write_file_test.txt";
   const auto permissions = std::filesystem::perms::owner_read | std::filesystem::perms::owner_write;
@@ -124,4 +123,3 @@ TEST(FileHandlerTests, WriteFileRejectsSymbolicLinks) {
   std::filesystem::remove(link_name);
   std::filesystem::remove(target_name);
 }
-#endif

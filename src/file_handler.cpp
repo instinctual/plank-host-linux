@@ -8,11 +8,9 @@
 #include <filesystem>
 #include <fstream>
 
-#ifndef _WIN32
   #include <fcntl.h>
   #include <sys/stat.h>
   #include <unistd.h>
-#endif
 
 // local includes
 #include "file_handler.h"
@@ -50,23 +48,6 @@ namespace file_handler {
   }
 
   int write_file(const char *path, const std::string_view &contents, std::filesystem::perms permissions) {
-#ifdef _WIN32
-    std::ofstream out(path);
-
-    if (!out.is_open()) {
-      return -1;
-    }
-
-    out << contents;
-
-    std::error_code error;
-    std::filesystem::permissions(path, permissions, std::filesystem::perm_options::replace, error);
-    if (error) {
-      return -1;
-    }
-
-    return 0;
-#else
     mode_t mode = 0;
     const auto has_permission = [permissions](std::filesystem::perms permission) {
       return (permissions & permission) != std::filesystem::perms::none;
@@ -111,6 +92,5 @@ namespace file_handler {
     }
 
     return 0;
-#endif
   }
 }  // namespace file_handler

@@ -134,11 +134,7 @@ if(NOT GLAD_SKIP_PIP_INSTALL)
                 COMMAND_ERROR_IS_FATAL ANY
         )
 
-        if(WIN32)
-            set(_glad_python_executable "${_glad_python_venv}/Scripts/python.exe")
-        else()
-            set(_glad_python_executable "${_glad_python_venv}/bin/python")
-        endif()
+        set(_glad_python_executable "${_glad_python_venv}/bin/python")
 
         execute_process(
                 COMMAND "${UV_EXECUTABLE}" pip install

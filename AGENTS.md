@@ -1,5 +1,6 @@
-On Windows we use msys2 and ucrt64 to compile.
-You need to prefix commands with `C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c`.
+This subtree builds the PLANK Linux Host only. Follow the parent repository's
+AGENTS.md and release build runbook for Rocky Linux qualification and hosted
+package builds. The native macOS Host lives in the parent repository.
 
 Prefix build directories with `cmake-build-`.
 

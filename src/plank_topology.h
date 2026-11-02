@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "../../../../protocol/plank-transport/include/plank_encoding_profiles.h"
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -162,24 +163,11 @@ namespace plank::topology {
     std::string_view encoder_backend,
     std::string_view encoding_mode
   ) {
-    if (encoder_backend == "software-cuda") {
-      if (capture_source == "nvfbc") {
-        return encoding_mode == "h264-8-422-software" ||
-               encoding_mode == "h264-8-444-software" ||
-               encoding_mode == "h264-10-422-software" ||
-               encoding_mode == "h264-10-444-software";
-      }
-      return capture_source == "x11-native10" &&
-             encoding_mode == "h264-10-444-software";
-    }
-    if (encoder_backend == "nvenc-direct") {
-      if (capture_source == "nvfbc") {
-        return encoding_mode == "h264-8-444-nvenc" ||
-               encoding_mode == "hevc-8-444-nvenc" ||
-               encoding_mode == "hevc-10-444-nvenc";
-      }
-      return capture_source == "x11-native10" &&
-             encoding_mode == "hevc-10-444-nvenc";
+    for (const auto &profile : plank_encoding_profiles) {
+      if (profile.encoder == PLANK_ENCODER_APPLE || encoding_mode != profile.mode ||
+          encoder_backend != profile.backend) continue;
+      if (capture_source == "nvfbc") return (profile.capture_mask & 1) != 0;
+      if (capture_source == "x11-native10") return (profile.capture_mask & 2) != 0;
     }
     return false;
   }

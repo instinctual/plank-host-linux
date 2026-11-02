@@ -11,14 +11,6 @@
 #include <src/input.h>
 #include <thread>
 
-#ifdef _WIN32
-  #include <Windows.h>
-#endif
-
-#if defined(__APPLE__) && defined(__MACH__)
-  #include <ApplicationServices/ApplicationServices.h>
-#endif
-
 namespace {
   constexpr double mouse_position_tolerance = 1.0;
   constexpr auto mouse_input_wait = std::chrono::milliseconds(500);
@@ -60,31 +52,7 @@ namespace {
   }
 
   platf::touch_port_t absolute_mouse_test_port() {
-#ifdef _WIN32
-    return platf::touch_port_t {
-      .offset_x = GetSystemMetrics(SM_XVIRTUALSCREEN),
-      .offset_y = GetSystemMetrics(SM_YVIRTUALSCREEN),
-      .width = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN)),
-      .height = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN)),
-    };
-#elif defined(__APPLE__) && defined(__MACH__)
-    const auto display_bounds = CGDisplayBounds(CGMainDisplayID());
-    return platf::touch_port_t {
-      .offset_x = static_cast<int>(display_bounds.origin.x),
-      .offset_y = static_cast<int>(display_bounds.origin.y),
-      .width = static_cast<int>(display_bounds.size.width),
-      .height = static_cast<int>(display_bounds.size.height),
-    };
-#elif defined(__linux__) || defined(__FreeBSD__)
-    return platf::touch_port_t {
-      .offset_x = 0,
-      .offset_y = 0,
-      .width = 19200,
-      .height = 12000,
-    };
-#else
     return platf::touch_port_t {};
-#endif
   }
 
   util::point_t expected_absolute_mouse_location(const util::point_t &mouse_pos, const platf::touch_port_t &touch_port) {

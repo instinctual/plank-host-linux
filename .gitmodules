@@ -21,17 +21,9 @@
 	path = third-party/moonlight-common-c
 	url = https://github.com/instinctual/plank-common-c.git
 	branch = plank/host
-[submodule "third-party/nvapi"]
-	path = third-party/nvapi
-	url = https://github.com/NVIDIA/nvapi.git
-	branch = main
 [submodule "third-party/Simple-Web-Server"]
 	path = third-party/Simple-Web-Server
 	url = https://github.com/LizardByte-infrastructure/Simple-Web-Server.git
-	branch = master
-[submodule "third-party/ViGEmClient"]
-	path = third-party/ViGEmClient
-	url = https://github.com/LizardByte/Virtual-Gamepad-Emulation-Client.git
 	branch = master
 [submodule "third-party/googletest"]
 	path = third-party/googletest

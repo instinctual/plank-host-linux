@@ -9,8 +9,8 @@ project(PlankHost VERSION 0.0.0
         DESCRIPTION "PLANK remote workstation host"
         HOMEPAGE_URL "https://instinctual.la")
 
-if(APPLE)
-    message(FATAL_ERROR "Build the native macOS Host from apps/host/macos in the PLANK parent repository.")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "This target builds the Linux Host only. The native macOS Host lives in apps/host/macos in the PLANK parent repository.")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
@@ -40,16 +40,8 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-    set(FREEBSD ON)
-endif()
-
 # set the module path, used for includes
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-
-# CPM
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cpm/CPM.cmake)
-CPMUsePackageLock(package-lock.cmake)
 
 # export compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

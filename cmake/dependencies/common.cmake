@@ -15,7 +15,6 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/Simple-Web-Server")
 include("${CMAKE_CURRENT_LIST_DIR}/lizardbyte_common.cmake")
 
 # common dependencies
-include("${CMAKE_MODULE_PATH}/dependencies/nv_codec_headers.cmake")
 include("${CMAKE_MODULE_PATH}/dependencies/nlohmann_json.cmake")
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
@@ -28,10 +27,5 @@ set(OPUS_USE_STATIC ON CACHE BOOL "Static linking for libopus")
 include("${CMAKE_MODULE_PATH}/dependencies/FindOpus.cmake")
 
 # platform specific dependencies
-if(WIN32)
-    include("${CMAKE_MODULE_PATH}/dependencies/windows.cmake")
-elseif(UNIX)
-    include("${CMAKE_MODULE_PATH}/dependencies/unix.cmake")
-
-    include("${CMAKE_MODULE_PATH}/dependencies/linux.cmake")
-endif()
+include("${CMAKE_MODULE_PATH}/dependencies/unix.cmake")
+include("${CMAKE_MODULE_PATH}/dependencies/linux.cmake")

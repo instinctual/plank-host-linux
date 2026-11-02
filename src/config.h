@@ -54,39 +54,12 @@ namespace config {
     struct {
       std::string sw_preset;
       std::string sw_tune;
-      std::optional<int> svtav1_preset;
       int vbv_maxrate_percentage;  ///< Peak software-encoder rate as a percentage of the requested average rate.
       int vbv_buffer_frames;  ///< Software-encoder VBV reservoir in average-rate frame units; zero keeps legacy sizing.
       int scenecut;  ///< x264 scene-change threshold; zero disables adaptive keyframes.
     } sw;  ///< Software encoder options.
 
     nvenc::nvenc_config nv;  ///< NVIDIA NVENC encoder settings.
-    bool nv_realtime_hags;  ///< Enable the NVIDIA realtime HAGS workaround.
-    bool nv_opengl_vulkan_on_dxgi;  ///< Prefer NVIDIA OpenGL/Vulkan-on-DXGI interop.
-    bool nv_sunshine_high_power_mode;  ///< Request NVIDIA high-power mode for Sunshine.
-
-    struct {
-      std::optional<int> qsv_preset;
-      std::optional<int> qsv_cavlc;
-      bool qsv_slow_hevc;
-    } qsv;  ///< Intel Quick Sync encoder options.
-
-    struct {
-      std::optional<int> amd_usage_h264;
-      std::optional<int> amd_usage_hevc;
-      std::optional<int> amd_usage_av1;
-      std::optional<int> amd_rc_h264;
-      std::optional<int> amd_rc_hevc;
-      std::optional<int> amd_rc_av1;
-      std::optional<int> amd_enforce_hrd;
-      std::optional<int> amd_quality_h264;
-      std::optional<int> amd_quality_hevc;
-      std::optional<int> amd_quality_av1;
-      std::optional<int> amd_preanalysis;
-      std::optional<int> amd_vbaq;
-      int amd_coder;
-    } amd;  ///< AMD AMF encoder options.
-
     std::string adapter_name;  ///< Display adapter selected in configuration.
 
     double minimum_fps_target;  ///< Lowest framerate that will be used when streaming. Range 0-1000, 0 = half of client's requested framerate.
@@ -99,7 +72,6 @@ namespace config {
     std::string sink;  ///< Audio output device/sink to use for audio capture
     std::string virtual_sink;  ///< Virtual audio sink for audio routing
     bool stream;  ///< Enable audio streaming to clients
-    bool install_steam_drivers;  ///< Install Steam audio drivers for enhanced compatibility
   };
 
   /**
@@ -132,13 +104,6 @@ namespace config {
     std::chrono::milliseconds key_repeat_delay;  ///< Delay before repeating a held keyboard key.
     std::chrono::duration<double> key_repeat_period;  ///< Interval between repeated keyboard key events.
 
-#ifdef _WIN32
-    std::string gamepad;  ///< Legacy Windows-only virtual controller backend selection.
-    bool ds4_back_as_touchpad_click;  ///< Legacy Windows-only Back/Select mapping.
-    bool motion_as_ds4;  ///< Legacy Windows-only motion-controller mapping.
-    bool touchpad_as_ds4;  ///< Legacy Windows-only touch-controller mapping.
-    bool virtualhid_randomize_mac;  ///< Legacy Windows-only virtual controller identity policy.
-#endif
 
     bool keyboard;  ///< Enable keyboard input from clients.
     bool key_rightalt_to_key_win;  ///< Map the client Right Alt key to the Windows key.

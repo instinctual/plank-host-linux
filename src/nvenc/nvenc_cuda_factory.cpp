@@ -2,7 +2,6 @@
  * @file src/nvenc/nvenc_cuda_factory.cpp
  * @brief API-version-specific Linux CUDA NVENC factory.
  */
-#ifndef _WIN32
 
 #include "nvenc_cuda.h"
 
@@ -13,4 +12,3 @@ namespace nvenc {
   }
 
 }  // namespace nvenc
-#endif

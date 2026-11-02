@@ -1178,17 +1178,10 @@ namespace nvhttp {
   }
 
   std::string get_plank_encoding_modes() {
-    static constexpr std::array modes {
-      "h264-8-422-software"sv,
-      "h264-8-444-software"sv,
-      "h264-10-422-software"sv,
-      "h264-10-444-software"sv,
-      "h264-8-444-nvenc"sv,
-      "hevc-8-444-nvenc"sv,
-      "hevc-10-444-nvenc"sv,
-    };
     std::string result;
-    for (const auto mode : modes) {
+    for (const auto &profile : plank_encoding_profiles) {
+      if (profile.encoder == PLANK_ENCODER_APPLE) continue;
+      const std::string_view mode = profile.mode;
       if (!video::encoding_mode_available(mode)) {
         continue;
       }
