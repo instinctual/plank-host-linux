@@ -31,9 +31,6 @@ using namespace std::literals;
 
 struct sockaddr;
 struct AVFrame;
-struct AVBufferRef;
-struct AVCodecContext;
-struct AVDictionary;
 
 namespace video {
   struct config_t;

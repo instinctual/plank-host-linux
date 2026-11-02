@@ -1272,8 +1272,12 @@ namespace video {
       ctx->thread_count = ctx->slices;
 
       AVDictionary *options {nullptr};
-      av_dict_set(&options, "preset", config::video.sw.sw_preset.c_str(), 0);
-      av_dict_set(&options, "tune", config::video.sw.sw_tune.c_str(), 0);
+      if (!config::video.sw.sw_preset.empty()) {
+        av_dict_set(&options, "preset", config::video.sw.sw_preset.c_str(), 0);
+      }
+      if (!config::video.sw.sw_tune.empty()) {
+        av_dict_set(&options, "tune", config::video.sw.sw_tune.c_str(), 0);
+      }
       av_dict_set_int(&options, "sc_threshold", config::video.sw.scenecut, 0);
       auto release_options = util::fail_guard([&]() {
         av_dict_free(&options);
