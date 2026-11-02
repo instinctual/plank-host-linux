@@ -749,7 +749,7 @@ namespace platf {
       }
     }
 
-    frame_t host_frame;  ///< Owned FFmpeg software frame.
+    video::avcodec_frame_t host_frame;  ///< Owned FFmpeg software frame.
     std::vector<std::jthread> workers;  ///< Persistent packed-to-planar workers.
     std::mutex work_mutex;  ///< Protects generation and completion state.
     std::condition_variable_any work_ready;  ///< Signals a new source frame.

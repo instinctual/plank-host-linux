@@ -26,6 +26,7 @@ extern "C" {
 // local includes
 #include "cuda.h"
 #include "cuda_host_registration.h"
+#include "misc.h"
 #include "src/config.h"
 #include "src/frame_timing.h"
 #include "src/logging.h"
@@ -545,7 +546,7 @@ namespace cuda {
       }
     }
 
-    frame_t host_frame;  ///< Owned FFmpeg software frame.
+    video::avcodec_frame_t host_frame;  ///< Owned FFmpeg software frame.
     sws_t sws;  ///< CUDA identity-GBR converter.
     stream_t stream;  ///< CUDA conversion and readback stream.
     std::vector<std::jthread> workers;  ///< Persistent CPU depth-expansion workers.
