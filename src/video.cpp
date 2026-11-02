@@ -1322,9 +1322,9 @@ namespace video {
       }
 
       if (auto status = avcodec_open2(ctx.get(), codec, &options)) {
-        char error[AV_ERROR_MAX_STRING_SIZE] {};
+        char error_text[AV_ERROR_MAX_STRING_SIZE] {};
         BOOST_LOG(error) << "Could not open codec [" << codec_name << "]: "
-                         << av_make_error_string(error, sizeof(error), status);
+                         << av_make_error_string(error_text, sizeof(error_text), status);
         return nullptr;
       }
     }

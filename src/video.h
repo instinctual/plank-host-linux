@@ -561,10 +561,9 @@ namespace video {
    * @param encoder Encoder configuration or encoder instance.
    * @param expect_failure Expect failure.
    * @param test_hevc Probe HEVC support for an exact PLANK HEVC backend.
-   * @param test_av1 Probe AV1 support when an exact PLANK AV1 profile exists.
    * @return True when encoder validation matches `expect_failure`.
    */
-  bool validate_encoder(encoder_t &encoder, bool expect_failure, bool test_hevc = false, bool test_av1 = false);
+  bool validate_encoder(encoder_t &encoder, bool expect_failure, bool test_hevc = false);
 
   /**
    * @brief Probe encoders and select the preferred encoder.

@@ -162,7 +162,7 @@ struct EncoderTest: PlatformTestSuite, testing::WithParamInterface<video::encode
     auto &encoder = *GetParam();
     // Use the same codec eligibility as the product's backend probes.
     const bool probe_hevc = encoder.name == "nvenc-direct";
-    if (!video::validate_encoder(encoder, false, probe_hevc, false)) {
+    if (!video::validate_encoder(encoder, false, probe_hevc)) {
       // Encoder failed validation,
       // if it's software - fail, otherwise skip
       if (encoder.name == "software") {
