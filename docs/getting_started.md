@@ -1,5 +1,9 @@
 # Getting Started
 
+> Historical Sunshine documentation, retained for upstream context. These
+> installation and configuration instructions do not describe PLANK. Use the
+> [PLANK Linux Host README](../README.md) and parent build runbook instead.
+
 The recommended method for running Sunshine is to use the [binaries](#binaries) included in the
 [latest release][latest-release], unless otherwise specified.
 

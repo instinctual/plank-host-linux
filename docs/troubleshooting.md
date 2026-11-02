@@ -1,5 +1,9 @@
 # Troubleshooting
 
+> Historical Sunshine documentation, retained for upstream context. Its Windows,
+> gamepad, network-port and capture instructions do not apply to PLANK. See the
+> [PLANK Linux Host README](../README.md) for the supported product and logs.
+
 ## General
 
 ### Forgotten Credentials
