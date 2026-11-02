@@ -12,7 +12,6 @@
 #include <cmath>
 #include <cstring>
 #include <list>
-#include <numeric>
 #include <thread>
 #include <utility>
 
@@ -35,6 +34,7 @@ extern "C" {
 #include "cbs.h"
 #include "config.h"
 #include "globals.h"
+#include "frame_timing.h"
 #include "input.h"
 #include "logging.h"
 #include "nvenc/nvenc_encoder.h"
@@ -64,8 +64,6 @@ namespace video {
   }
 
   namespace {
-    constexpr double frame_budget_us = 1000000.0 / 60.0;
-
 #ifdef __linux__
     /**
      * @brief Allow x264 workers to use every CPU available to Sunshine.
@@ -100,79 +98,48 @@ namespace video {
 #endif
 
     /**
-     * @brief Select a nearest-rank percentile from sorted timing samples.
-     *
-     * @param sorted Timing samples in ascending order.
-     * @param percentile Fractional percentile in the range zero to one.
-     * @return The selected sample, or zero when no samples are available.
-     */
-    double timing_percentile(const std::vector<double> &sorted, double percentile) {
-      if (sorted.empty()) {
-        return 0.0;
-      }
-      const auto rank = static_cast<std::size_t>(std::ceil(percentile * sorted.size()));
-      return sorted[std::clamp<std::size_t>(rank, 1, sorted.size()) - 1];
-    }
-
-    /**
-     * @brief Log aggregate PLANK timing statistics for one boundary.
-     *
-     * @param name Stable boundary name for qualification log parsing.
-     * @param samples Durations in microseconds.
-     */
-    void log_timing_samples(std::string_view name, const std::vector<double> &samples) {
-      if (samples.size() < 60) {
-        return;
-      }
-
-      auto sorted = samples;
-      std::ranges::sort(sorted);
-      const auto total = std::accumulate(sorted.begin(), sorted.end(), 0.0);
-      const auto misses = std::ranges::count_if(sorted, [](double duration_us) {
-        return duration_us > frame_budget_us;
-      });
-      BOOST_LOG(info)
-        << "PLANK timing " << name
-        << ": samples=" << sorted.size()
-        << " mean_ms=" << total / sorted.size() / 1000.0
-        << " p50_ms=" << timing_percentile(sorted, 0.50) / 1000.0
-        << " p95_ms=" << timing_percentile(sorted, 0.95) / 1000.0
-        << " p99_ms=" << timing_percentile(sorted, 0.99) / 1000.0
-        << " max_ms=" << sorted.back() / 1000.0
-        << " over_16_67ms=" << misses;
-    }
-
-    /**
-     * @brief Collect display-to-packet timing samples for a software stream.
+     * @brief Collect bounded display-to-packet timing for either maintained encoder.
      */
     struct integrated_timing_samples_t {
       /**
        * @brief Emit the completed stream's aggregate timing distributions.
        */
-      explicit integrated_timing_samples_t(bool native10 = false): native10(native10) {}
+      explicit integrated_timing_samples_t(std::string_view conversion_name): conversion_name(conversion_name) {}
 
       ~integrated_timing_samples_t() {
-        log_timing_samples("display_to_convert_start", display_to_convert_start_us);
-        log_timing_samples(
-          native10 ?
-            "native10_rgb_to_gbr_conversion" :
-            "cuda_to_cpu_conversion",
+        log_frame_timing("display_to_convert_start", display_to_convert_start_us);
+        log_frame_timing(
+          conversion_name,
           conversion_us
         );
-        log_timing_samples("encode_and_packetize", encode_and_packetize_us);
-        log_timing_samples("display_to_packet_ready", display_to_packet_ready_us);
-        log_timing_samples("packet_ready_cadence", packet_ready_cadence_us);
+        log_frame_timing("encode_and_packetize", encode_and_packetize_us);
+        log_frame_timing("display_to_packet_ready", display_to_packet_ready_us);
+        log_frame_timing("packet_ready_cadence", packet_ready_cadence_us);
       }
 
-      std::vector<double> display_to_convert_start_us;
-      std::vector<double> conversion_us;
-      std::vector<double> encode_and_packetize_us;
-      std::vector<double> display_to_packet_ready_us;
-      std::vector<double> packet_ready_cadence_us;
+      timing_samples_t display_to_convert_start_us;
+      timing_samples_t conversion_us;
+      timing_samples_t encode_and_packetize_us;
+      timing_samples_t display_to_packet_ready_us;
+      timing_samples_t packet_ready_cadence_us;
       std::optional<std::chrono::steady_clock::time_point> last_packet_ready;
-      bool native10;
+      std::string_view conversion_name;
     };
   }  // namespace
+
+  void log_frame_timing(std::string_view name, const timing_samples_t &samples) {
+    if (samples.size() < 60) return;
+    const auto summary = samples.summary();
+    BOOST_LOG(info) << "PLANK timing " << name
+      << ": samples=" << summary.count
+      << " percentile_window_samples=" << summary.window_samples
+      << " mean_ms=" << summary.mean / 1000.0
+      << " p50_ms=" << summary.p50 / 1000.0
+      << " p95_ms=" << summary.p95 / 1000.0
+      << " p99_ms=" << summary.p99 / 1000.0
+      << " max_ms=" << summary.maximum / 1000.0
+      << " over_16_67ms=" << summary.over_budget;
+  }
 
   /**
    * @brief Release context resources.
@@ -431,7 +398,6 @@ namespace video {
    */
   enum flag_e : uint32_t {
     DEFAULT = 0,  ///< Default flags
-    PARALLEL_ENCODING = 1 << 1,  ///< Capture and encoding can run concurrently on separate threads
     H264_ONLY = 1 << 2,  ///< When HEVC is too heavy
     LIMITED_GOP_SIZE = 1 << 3,  ///< Some encoders don't like it when you have an infinite GOP_SIZE. e.g. VAAPI
     SINGLE_SLICE_ONLY = 1 << 4,  ///< Never use multiple slices. Older intel iGPU's ruin it for everyone else
@@ -477,7 +443,7 @@ namespace video {
     avcodec_encode_session_t(avcodec_encode_session_t &&other) noexcept = default;
 
     ~avcodec_encode_session_t() {
-      log_timing_samples("x264_encode_completion", encode_completion_us);
+      log_frame_timing("x264_encode_completion", encode_completion_us);
 
       // Flush any remaining frames in the encoder if the encoder started up (frame num > 0)
       if (avcodec_ctx->frame_num > 0 && avcodec_send_frame(avcodec_ctx.get(), nullptr) == 0) {
@@ -570,7 +536,7 @@ namespace video {
     int inject;  ///< Number of upcoming IDR frames that should receive rewritten parameter sets.
     bool warmup_pending;  ///< Whether the first encode should be discarded to absorb x264 startup allocation.
     bool measure_timing;  ///< Whether this PLANK x264 session should emit timing statistics.
-    std::vector<double> encode_completion_us;  ///< Frame submission to first encoded packet availability.
+    timing_samples_t encode_completion_us;  ///< Frame submission to first encoded packet availability.
   };
 
   /**
@@ -661,40 +627,6 @@ namespace video {
   };
 
   /**
-   * @brief Context object used while synchronizing encode sessions.
-   */
-  struct sync_session_ctx_t {
-    safe::signal_t *join_event;  ///< Signal raised when the capture and encode workers should join.
-    safe::mail_raw_t::event_t<bool> shutdown_event;  ///< Event raised when the stream should shut down.
-    safe::mail_raw_t::queue_t<packet_t> packets;  ///< Queue receiving encoded video packets for the stream sender.
-    safe::mail_raw_t::event_t<bool> idr_events;  ///< Event raised when an IDR frame is requested.
-    safe::mail_raw_t::event_t<hdr_info_t> hdr_events;  ///< Event carrying updated HDR metadata.
-    safe::mail_raw_t::event_t<input::touch_port_t> touch_port_events;  ///< Event carrying updated touch viewport metadata.
-    safe::mail_raw_t::event_t<int> bitrate_events;  ///< Active-session bitrate requests in kilobits per second.
-
-    config_t config;  ///< Stream or encoder configuration captured for the worker.
-    int frame_nr;  ///< Next capture-frame number assigned to encoded packets.
-    void *channel_data;  ///< Platform-specific channel data forwarded to packet senders.
-  };
-
-  /**
-   * @brief Synchronization state for one encode session.
-   */
-  struct sync_session_t {
-    sync_session_ctx_t *ctx;  ///< Shared capture/encode synchronization context.
-    std::unique_ptr<encode_session_t> session;  ///< Active encoder session used by the capture thread.
-  };
-
-  /**
-   * @brief Queue of encode-session contexts waiting for capture work.
-   */
-  using encode_session_ctx_queue_t = safe::queue_t<sync_session_ctx_t>;
-  /**
-   * @brief Platform capture status returned by encode operations.
-   */
-  using encode_e = platf::capture_e;
-
-  /**
    * @brief Capture thread context shared with the encoder session.
    */
   struct capture_ctx_t {
@@ -715,26 +647,6 @@ namespace video {
   };
 
   /**
-   * @brief Synchronous capture thread state.
-   */
-  struct capture_thread_sync_ctx_t {
-    encode_session_ctx_queue_t encode_session_ctx_queue {30};  ///< Encode session ctx queue.
-  };
-
-  /**
-   * @brief Start the synchronous multi-client capture thread.
-   *
-   * @param ctx Native context object used by the operation or callback.
-   * @return 0 when the capture thread is started.
-   */
-  int start_capture_sync(capture_thread_sync_ctx_t &ctx);
-  /**
-   * @brief Stop capture sync processing.
-   *
-   * @param ctx Native context object used by the operation or callback.
-   */
-  void end_capture_sync(capture_thread_sync_ctx_t &ctx);
-  /**
    * @brief Start the asynchronous capture thread.
    *
    * @param ctx Native context object used by the operation or callback.
@@ -750,7 +662,6 @@ namespace video {
 
   // Keep a reference counter to ensure the capture thread only runs when other threads have a reference to the capture thread
   auto capture_thread_async = safe::make_shared<capture_thread_async_ctx_t>(start_capture_async, end_capture_async);  ///< Capture thread async.
-  auto capture_thread_sync = safe::make_shared<capture_thread_sync_ctx_t>(start_capture_sync, end_capture_sync);  ///< Capture thread sync.
 
 
 #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
@@ -769,7 +680,7 @@ namespace video {
     {{}, {}, {}, {}, {}, {}, "av1_nvenc"s},
     {{}, {}, {}, {}, {}, {}, "hevc_nvenc"s},
     {{}, {}, {}, {}, {}, {}, "h264_nvenc"s},
-    PARALLEL_ENCODING | REF_FRAMES_INVALIDATION | YUV444_SUPPORT | ASYNC_TEARDOWN
+    REF_FRAMES_INVALIDATION | YUV444_SUPPORT | ASYNC_TEARDOWN
   };
 #endif
 
@@ -809,7 +720,7 @@ namespace video {
       {},
       "libx264"s,
     },
-    H264_ONLY | PARALLEL_ENCODING | ALWAYS_REPROBE | YUV444_SUPPORT | YUV422_SUPPORT
+    H264_ONLY | ALWAYS_REPROBE | YUV444_SUPPORT | YUV422_SUPPORT
   };
 #endif
 
@@ -1984,9 +1895,10 @@ namespace video {
       return;
     }
     integrated_timing_samples_t timing {
-      config.capture_source == capture_source_e::x11_native10
+      encoder.name == "nvenc-direct"sv ? "nvenc_upload_and_conversion"sv :
+      config.capture_source == capture_source_e::x11_native10 ?
+        "native10_rgb_to_gbr_conversion"sv : "cuda_to_cpu_conversion"sv
     };
-    const bool measure_integrated_timing = encoder.name == "software-cuda"sv;
 
     // As a workaround for NVENC hangs and to generally speed up encoder reinit,
     // we will complete the encoder teardown in a separate thread if supported.
@@ -2070,7 +1982,7 @@ namespace video {
         if (auto img = images->pop(max_frametime)) {
           frame_timestamp = img->frame_timestamp;
           const auto conversion_start = std::chrono::steady_clock::now();
-          if (measure_integrated_timing && frame_timestamp) {
+          if (frame_timestamp) {
             timing.display_to_convert_start_us.push_back(
               std::chrono::duration<double, std::micro>(conversion_start - *frame_timestamp).count()
             );
@@ -2079,7 +1991,7 @@ namespace video {
             BOOST_LOG(error) << "Could not convert image"sv;
             return;
           }
-          if (measure_integrated_timing && frame_timestamp) {
+          if (frame_timestamp) {
             timing.conversion_us.push_back(
               std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - conversion_start).count()
             );
@@ -2109,7 +2021,7 @@ namespace video {
         return;
       }
       const auto packet_ready = std::chrono::steady_clock::now();
-      if (measure_integrated_timing && frame_timestamp) {
+      if (frame_timestamp) {
         timing.encode_and_packetize_us.push_back(
           std::chrono::duration<double, std::micro>(packet_ready - encode_start).count()
         );
@@ -2266,292 +2178,6 @@ namespace video {
   }
 
   /**
-   * @brief Create synced session.
-   *
-   * @param disp Display connection or display handle.
-   * @param encoder Encoder configuration or encoder instance.
-   * @param img Image or frame object to read from or populate.
-   * @param ctx Native context object used by the operation or callback.
-   * @return Constructed synced session object.
-   */
-  std::optional<sync_session_t> make_synced_session(platf::display_t *disp, const encoder_t &encoder, platf::img_t &img, sync_session_ctx_t &ctx) {
-    sync_session_t encode_session;
-
-    encode_session.ctx = &ctx;
-
-    auto encode_device = make_encode_device(*disp, encoder, ctx.config);
-    if (!encode_device) {
-      return std::nullopt;
-    }
-
-    // absolute mouse coordinates require that the dimensions of the screen are known
-    ctx.touch_port_events->raise(make_port(disp, ctx.config));
-
-    // Update client with our current HDR display state
-    hdr_info_t hdr_info = std::make_unique<hdr_info_raw_t>(false);
-    if (colorspace_is_hdr(encode_device->colorspace)) {
-      if (disp->get_hdr_metadata(hdr_info->metadata)) {
-        hdr_info->enabled = true;
-      } else {
-        BOOST_LOG(error) << "Couldn't get display hdr metadata when colorspace selection indicates it should have one";
-      }
-    }
-    ctx.hdr_events->raise(std::move(hdr_info));
-
-    auto session = make_encode_session(disp, encoder, ctx.config, img.width, img.height, std::move(encode_device));
-    if (!session) {
-      return std::nullopt;
-    }
-
-    // Load the initial image to prepare for encoding
-    if (session->convert(img)) {
-      BOOST_LOG(error) << "Could not convert initial image"sv;
-      return std::nullopt;
-    }
-
-    encode_session.session = std::move(session);
-
-    return encode_session;
-  }
-
-  /**
-   * @brief Run synchronized capture and encoding.
-   *
-   * @param synced_session_ctxs Active synchronized session contexts.
-   * @param encode_session_ctx_queue Pending synchronized session context queue.
-   * @param display_names Cached display names.
-   * @param display_p Active display index.
-   * @return Encoder loop result.
-   */
-  encode_e encode_run_sync(
-    std::vector<std::unique_ptr<sync_session_ctx_t>> &synced_session_ctxs,
-    encode_session_ctx_queue_t &encode_session_ctx_queue,
-    std::vector<std::string> &display_names,
-    int &display_p
-  ) {
-    const auto &encoder = *chosen_encoder;
-
-    std::shared_ptr<platf::display_t> disp;
-
-    auto switch_display_event = mail::man->event<int>(mail::switch_display);
-    auto desktop_reattach_event =
-      mail::man->event<std::uint64_t>(mail::desktop_reattach);
-#ifdef __linux__
-    const auto attached_generation = plank::session::desktop_generation();
-#endif
-
-    if (synced_session_ctxs.empty()) {
-      auto ctx = encode_session_ctx_queue.pop();
-      if (!ctx) {
-        return encode_e::ok;
-      }
-
-      synced_session_ctxs.emplace_back(std::make_unique<sync_session_ctx_t>(std::move(*ctx)));
-    }
-
-    while (encode_session_ctx_queue.running()) {
-      while (desktop_reattach_event->peek()) {
-        desktop_reattach_event->pop();
-      }
-      // Refresh display names since a display removal might have caused the reinitialization
-      refresh_displays(encoder.platform_formats->dev_type, synced_session_ctxs.front()->config.output_name,
-                       synced_session_ctxs.front()->config.span_desktop,
-                       display_names, display_p);
-
-      // Process any pending display switch with the new list of displays
-      if (switch_display_event->peek()) {
-        display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
-      }
-
-      // reset_display() will sleep between retries
-      reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], synced_session_ctxs.front()->config);
-      if (disp) {
-        break;
-      }
-    }
-
-    if (!disp) {
-      return encode_e::error;
-    }
-
-    auto img = disp->alloc_img();
-    if (!img || disp->dummy_img(img.get())) {
-      return encode_e::error;
-    }
-
-    std::vector<sync_session_t> synced_sessions;
-    for (auto &ctx : synced_session_ctxs) {
-      auto synced_session = make_synced_session(disp.get(), encoder, *img, *ctx);
-      if (!synced_session) {
-        return encode_e::error;
-      }
-
-      synced_sessions.emplace_back(std::move(*synced_session));
-    }
-
-    auto ec = platf::capture_e::ok;
-    while (encode_session_ctx_queue.running()) {
-      auto push_captured_image_callback = [&](std::shared_ptr<platf::img_t> &&img, bool frame_captured) -> bool {
-        while (encode_session_ctx_queue.peek()) {
-          auto encode_session_ctx = encode_session_ctx_queue.pop();
-          if (!encode_session_ctx) {
-            return false;
-          }
-
-          synced_session_ctxs.emplace_back(std::make_unique<sync_session_ctx_t>(std::move(*encode_session_ctx)));
-
-          auto encode_session = make_synced_session(disp.get(), encoder, *img, *synced_session_ctxs.back());
-          if (!encode_session) {
-            ec = platf::capture_e::error;
-            return false;
-          }
-
-          synced_sessions.emplace_back(std::move(*encode_session));
-        }
-
-        KITTY_WHILE_LOOP(auto pos = std::begin(synced_sessions), pos != std::end(synced_sessions), {
-          auto ctx = pos->ctx;
-          if (ctx->shutdown_event->peek()) {
-            // Let waiting thread know it can delete shutdown_event
-            ctx->join_event->raise(true);
-
-            pos = synced_sessions.erase(pos);
-            synced_session_ctxs.erase(std::find_if(std::begin(synced_session_ctxs), std::end(synced_session_ctxs), [&ctx_p = ctx](auto &ctx) {
-              return ctx.get() == ctx_p;
-            }));
-
-            if (synced_sessions.empty()) {
-              return false;
-            }
-
-            continue;
-          }
-
-          if (ctx->idr_events->peek()) {
-            pos->session->request_idr_frame();
-            ctx->idr_events->pop();
-          }
-
-          std::optional<int> requested_bitrate_kbps;
-          while (ctx->bitrate_events->peek()) {
-            requested_bitrate_kbps = ctx->bitrate_events->pop(0ms);
-          }
-          if (requested_bitrate_kbps && *requested_bitrate_kbps != ctx->config.bitrate) {
-            BOOST_LOG(info) << "Recreating active PLANK ABR encoder: old="sv
-                            << ctx->config.bitrate << " Kbps, new="sv
-                            << *requested_bitrate_kbps << " Kbps"sv;
-            ctx->config.bitrate = *requested_bitrate_kbps;
-            auto replacement = make_synced_session(disp.get(), encoder, *img, *ctx);
-            if (!replacement) {
-              BOOST_LOG(error) << "Failed to recreate active PLANK ABR encoder"sv;
-              ctx->shutdown_event->raise(true);
-              continue;
-            }
-            *pos = std::move(*replacement);
-          }
-
-          if (frame_captured && pos->session->convert(*img)) {
-            BOOST_LOG(error) << "Could not convert image"sv;
-            ctx->shutdown_event->raise(true);
-
-            continue;
-          }
-
-          std::optional<std::chrono::steady_clock::time_point> frame_timestamp;
-          if (img) {
-            frame_timestamp = img->frame_timestamp;
-          }
-
-          if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp)) {
-            BOOST_LOG(error) << "Could not encode video packet"sv;
-            ctx->shutdown_event->raise(true);
-
-            continue;
-          }
-
-          pos->session->request_normal_frame();
-
-          ++pos;
-        })
-
-        if (switch_display_event->peek() || desktop_reattach_event->peek()) {
-          ec = platf::capture_e::reinit;
-          return false;
-        }
-
-        return true;
-      };
-
-      auto pull_free_image_callback = [&img](std::shared_ptr<platf::img_t> &img_out) -> bool {
-        img_out = img;
-        img_out->frame_timestamp.reset();
-        return true;
-      };
-
-      // PLANK always transports cursor shape separately. It is never
-      // composited into the captured video frame.
-      bool capture_cursor = false;
-      auto status = disp->capture(push_captured_image_callback, pull_free_image_callback, &capture_cursor);
-#ifdef __linux__
-      if (status == platf::capture_e::error &&
-          getenv("PLANK_SESSION_CONTROL_FD") != nullptr) {
-        const auto deadline = std::chrono::steady_clock::now() + 10s;
-        while (encode_session_ctx_queue.running() &&
-               plank::session::desktop_generation() == attached_generation &&
-               std::chrono::steady_clock::now() < deadline) {
-          std::this_thread::sleep_for(50ms);
-        }
-        if (plank::session::desktop_generation() != attached_generation) {
-          return encode_e::reinit;
-        }
-      }
-#endif
-      switch (status) {
-        case platf::capture_e::reinit:
-        case platf::capture_e::error:
-        case platf::capture_e::ok:
-        case platf::capture_e::timeout:
-        case platf::capture_e::interrupted:
-          return ec != platf::capture_e::ok ? ec : status;
-      }
-    }
-
-    return encode_e::ok;
-  }
-
-  /**
-   * @brief Run synchronous capture and encode work on the capture thread.
-   */
-  void captureThreadSync() {
-    auto ref = capture_thread_sync.ref();
-
-    std::vector<std::unique_ptr<sync_session_ctx_t>> synced_session_ctxs;
-
-    auto &ctx = ref->encode_session_ctx_queue;
-    auto lg = util::fail_guard([&]() {
-      ctx.stop();
-
-      for (auto &ctx : synced_session_ctxs) {
-        ctx->shutdown_event->raise(true);
-        ctx->join_event->raise(true);
-      }
-
-      for (auto &ctx : ctx.unsafe()) {
-        ctx.shutdown_event->raise(true);
-        ctx.join_event->raise(true);
-      }
-    });
-
-    // Encoding and capture takes place on this thread
-    platf::set_thread_name("video::capture_sync");
-    platf::adjust_thread_priority(platf::thread_priority_e::high);
-
-    std::vector<std::string> display_names;
-    int display_p = -1;
-    while (encode_run_sync(synced_session_ctxs, ctx, display_names, display_p) == encode_e::reinit) {}
-  }
-
-  /**
    * @brief Capture and encode video using the asynchronous capture thread.
    *
    * @param mail Session mail bus.
@@ -2663,27 +2289,7 @@ namespace video {
       mail->event<bool>(mail::shutdown)->raise(true);
       return;
     }
-    if (chosen_encoder->flags & PARALLEL_ENCODING) {
-      capture_async(std::move(mail), config, channel_data);
-    } else {
-      safe::signal_t join_event;
-      auto ref = capture_thread_sync.ref();
-      ref->encode_session_ctx_queue.raise(sync_session_ctx_t {
-        &join_event,
-        mail->event<bool>(mail::shutdown),
-        mail::man->queue<packet_t>(mail::video_packets),
-        std::move(idr_events),
-        mail->event<hdr_info_t>(mail::hdr),
-        mail->event<input::touch_port_t>(mail::touch_port),
-        mail->event<int>(mail::video_bitrate),
-        config,
-        1,
-        channel_data,
-      });
-
-      // Wait for join signal
-      join_event.view();
-    }
+    capture_async(std::move(mail), config, channel_data);
   }
 
   std::vector<platf::display_info_t> output_topology() {
@@ -3206,20 +2812,6 @@ namespace video {
     capture_thread_ctx.capture_ctx_queue->stop();
 
     capture_thread_ctx.capture_thread.join();
-  }
-
-  /**
-   * @brief Start capture sync.
-   */
-  int start_capture_sync(capture_thread_sync_ctx_t &ctx) {
-    std::jthread {&captureThreadSync}.detach();
-    return 0;
-  }
-
-  /**
-   * @brief Stop capture sync processing.
-   */
-  void end_capture_sync(capture_thread_sync_ctx_t &ctx) {
   }
 
   /**

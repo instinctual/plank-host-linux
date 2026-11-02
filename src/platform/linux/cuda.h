@@ -17,6 +17,7 @@
   #include "src/video_colorspace.h"
 
 namespace platf {
+  class deinit_t;
   struct avcodec_encode_device_t;
   struct nvenc_encode_device_t;
   struct img_t;
@@ -24,6 +25,19 @@ namespace platf {
 }  // namespace platf
 
 namespace cuda {
+
+  /**
+   * @brief Pin an existing SHM allocation for uploads, once for its lifetime.
+   *
+   * The returned owner must be destroyed before unmapping the allocation, and
+   * only after every GPU upload has completed. Uses portable registration so
+   * capture and encode threads may use different CUDA contexts. The process-wide
+   * registration budget is bounded; failure leaves the ordinary upload path.
+   * @param data Page-aligned shared-memory mapping.
+   * @param size Mapping's captured image size, in bytes.
+   * @return Registration owner, or null if registration is unavailable.
+   */
+  std::unique_ptr<platf::deinit_t> register_host_memory(void *data, std::size_t size);
 
   namespace nvfbc {
     std::vector<std::string> display_names();

@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <bitset>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <condition_variable>
@@ -12,7 +13,6 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <mutex>
-#include <numeric>
 #include <thread>
 
 // lib includes
@@ -27,8 +27,10 @@ extern "C" {
 
 // local includes
 #include "cuda.h"
+#include "cuda_host_registration.h"
 #include "graphics.h"
 #include "src/config.h"
+#include "src/frame_timing.h"
 #include "src/logging.h"
 #include "src/nvenc/nvenc_cuda_factory.h"
 #include "src/utility.h"
@@ -68,42 +70,6 @@ namespace cuda {
   constexpr auto cudaDevAttrMaxThreadsPerBlock = (CUdevice_attribute) 1;  ///< CUDA dev attr max threads per block.
   constexpr auto cudaDevAttrMaxThreadsPerMultiProcessor = (CUdevice_attribute) 39;  ///< CUDA dev attr max threads per multi processor.
 
-  namespace {
-    /**
-     * @brief Select a nearest-rank percentile from sorted timing samples.
-     *
-     * @param sorted Timing samples in ascending order.
-     * @param percentile Fractional percentile in the range zero to one.
-     * @return The selected timing sample.
-     */
-    double timing_percentile(const std::vector<double> &sorted, double percentile) {
-      const auto rank = static_cast<std::size_t>(std::ceil(percentile * sorted.size()));
-      return sorted[std::clamp<std::size_t>(rank, 1, sorted.size()) - 1];
-    }
-
-    /**
-     * @brief Log aggregate CUDA conversion timing for qualification runs.
-     *
-     * @param name Stable boundary name for log parsing.
-     * @param samples Durations in microseconds.
-     */
-    void log_cuda_timing(std::string_view name, const std::vector<double> &samples) {
-      if (samples.size() < 60) {
-        return;
-      }
-      auto sorted = samples;
-      std::ranges::sort(sorted);
-      const auto total = std::accumulate(sorted.begin(), sorted.end(), 0.0);
-      BOOST_LOG(info)
-        << "PLANK timing " << name
-        << ": samples=" << sorted.size()
-        << " mean_ms=" << total / sorted.size() / 1000.0
-        << " p50_ms=" << timing_percentile(sorted, 0.50) / 1000.0
-        << " p95_ms=" << timing_percentile(sorted, 0.95) / 1000.0
-        << " p99_ms=" << timing_percentile(sorted, 0.99) / 1000.0
-        << " max_ms=" << sorted.back() / 1000.0;
-    }
-  }  // namespace
 
   /**
    * @brief Convert a CUDA result code into Sunshine's capture status.
@@ -145,6 +111,43 @@ namespace cuda {
     }
 
     return 0;
+  }
+
+  namespace {
+    constexpr std::size_t native10_pin_budget = 256U * 1024U * 1024U;
+    std::atomic<std::size_t> native10_pinned_bytes {0};
+
+    /** @brief Keep driver symbols alive until the SHM registration is released. */
+    class host_registration_t final: public platf::deinit_t {
+    public:
+      void *library = nullptr;  ///< Driver DSO retained with the registration.
+      std::unique_ptr<host_memory_registration_t> memory;
+      ~host_registration_t() override {
+        memory.reset();
+        if (library) dlclose(library);
+      }
+    };
+  }
+
+  std::unique_ptr<platf::deinit_t> register_host_memory(void *data, std::size_t size) {
+    if (!cdf || !data || !size || size > native10_pin_budget) return nullptr;
+    auto owner = std::make_unique<host_registration_t>();
+    owner->library = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!owner->library) return nullptr;
+    host_registration_api_t api {
+      cdf->cuDeviceGet, cdf->cuDevicePrimaryCtxRetain, cdf->cuDevicePrimaryCtxRelease,
+      cdf->cuCtxPushCurrent, cdf->cuCtxPopCurrent, nullptr, nullptr,
+      [](CUresult result, const char *message) { check(result, message); }
+    };
+    api.register_memory = reinterpret_cast<decltype(api.register_memory)>(
+      dlsym(owner->library, "cuMemHostRegister_v2"));
+    api.unregister_memory = reinterpret_cast<decltype(api.unregister_memory)>(
+      dlsym(owner->library, "cuMemHostUnregister"));
+    if (!api.register_memory || !api.unregister_memory) return nullptr;
+    owner->memory = host_memory_registration_t::make(api, data, size,
+                                                    native10_pinned_bytes, native10_pin_budget);
+    if (!owner->memory) return nullptr;
+    return owner;
   }
 
   /**
@@ -415,10 +418,10 @@ namespace cuda {
      * @brief Release CUDA resources and stop depth-expansion workers.
      */
     ~cuda_software_t() override {
-      log_cuda_timing("cuda_dispatch", dispatch_us);
-      log_cuda_timing("gpu_readback_sync", readback_sync_us);
-      log_cuda_timing("cpu_depth_expansion", depth_expansion_us);
-      log_cuda_timing("cuda_software_convert_total", total_conversion_us);
+      video::log_frame_timing("cuda_dispatch", dispatch_us);
+      video::log_frame_timing("gpu_readback_sync", readback_sync_us);
+      video::log_frame_timing("cpu_depth_expansion", depth_expansion_us);
+      video::log_frame_timing("cuda_software_convert_total", total_conversion_us);
 
       for (auto &worker : workers) {
         worker.request_stop();
@@ -761,10 +764,10 @@ namespace cuda {
     std::mutex work_mutex;  ///< Protects expansion generation and completion state.
     std::condition_variable_any work_ready;  ///< Signals a new compact frame to workers.
     std::condition_variable work_done;  ///< Signals completion of all worker shares.
-    std::vector<double> dispatch_us;  ///< CUDA conversion/copy dispatch time before synchronization.
-    std::vector<double> readback_sync_us;  ///< Wait for CUDA conversion and GPU-to-CPU readback completion.
-    std::vector<double> depth_expansion_us;  ///< Exact compact 8-bit to 10-bit CPU expansion time.
-    std::vector<double> total_conversion_us;  ///< Full CUDA software conversion and readback service time.
+    video::timing_samples_t dispatch_us;  ///< CUDA conversion/copy dispatch time before synchronization.
+    video::timing_samples_t readback_sync_us;  ///< Wait for CUDA conversion and GPU-to-CPU readback completion.
+    video::timing_samples_t depth_expansion_us;  ///< Exact compact 8-bit to 10-bit CPU expansion time.
+    video::timing_samples_t total_conversion_us;  ///< Full CUDA software conversion and readback service time.
     std::uint64_t generation = 0;  ///< Current compact-frame expansion generation.
     unsigned int workers_pending = 0;  ///< Workers still expanding the current frame.
     CUdeviceptr device_compact = 0;  ///< Compact three-plane 8-bit CUDA surface.
@@ -791,6 +794,15 @@ namespace cuda {
   class cuda_nvenc_t final: public platf::nvenc_encode_device_t {
   public:
     ~cuda_nvenc_t() override {
+      video::log_frame_timing("native10_nvenc_upload_gpu", upload_gpu_us);
+      video::log_frame_timing("native10_nvenc_conversion_gpu", conversion_gpu_us);
+      video::log_frame_timing("native10_nvenc_dispatch", dispatch_us);
+      video::log_frame_timing("native10_nvenc_sync", sync_us);
+      video::log_frame_timing("native10_nvenc_total", total_us);
+      for (auto event : timing_events) {
+        if (event) CU_CHECK_IGNORE(cdf->cuEventDestroy(event), "Couldn't destroy NVENC timing event");
+      }
+      if (timing_driver) dlclose(timing_driver);
       encoder.reset();
       nvenc = nullptr;
       if (native10_source && cdf) {
@@ -878,6 +890,7 @@ namespace cuda {
       if (!stream) {
         return false;
       }
+      if (native10_input) init_timing();
       if (!native10_input) {
         auto converter = sws_t::make(input_width, input_height, output_width, output_height, input_width * 4);
         if (!converter) {
@@ -913,6 +926,12 @@ namespace cuda {
     }
 
     int convert(platf::img_t &img) override {
+      const auto started = std::chrono::steady_clock::now();
+      // Every early exit drains work before capture can reuse/unmap img. This
+      // also covers a conversion failure after a successful asynchronous upload.
+      auto drain = util::fail_guard([&]() {
+        CU_CHECK_IGNORE(cdf->cuStreamSynchronize(stream.get()), "Couldn't drain failed NVENC conversion");
+      });
       auto *base = reinterpret_cast<std::uint8_t *>(static_cast<std::uintptr_t>(surface));
       int status = 0;
       if (native10_input) {
@@ -930,13 +949,16 @@ namespace cuda {
         copy.dstPitch = native10_source_pitch;
         copy.WidthInBytes = static_cast<std::size_t>(input_width) * 4U;
         copy.Height = input_height;
+        record_timing(0);
         CU_CHECK(cdf->cuMemcpy2DAsync(&copy, stream.get()),
                  "Couldn't upload native X11 RGB10 frame");
+        record_timing(1);
         status = scale_xrgb10_to_yuv444_10bit(
           static_cast<std::uintptr_t>(native10_source), native10_source_pitch,
           input_width, input_height, base, base + pitch * output_height,
           base + pitch * output_height * 2, pitch,
           output_width, output_height, stream.get());
+        record_timing(2);
       } else {
         auto &texture = static_cast<cuda::img_t &>(img).tex;
         auto source = texture.texture.point;
@@ -957,14 +979,56 @@ namespace cuda {
           status = sws.convert_yuv444(base, base + pitch * output_height, base + pitch * output_height * 2, pitch, source, stream.get());
         }
       }
-      if (status) {
-        return status;
+      const auto submitted = std::chrono::steady_clock::now();
+      const auto synchronized = cdf->cuStreamSynchronize(stream.get());
+      drain.disable();
+      CU_CHECK(synchronized, "Couldn't synchronize direct NVENC conversion");
+      if (status) return status;
+      if (native10_input) {
+        const auto completed = std::chrono::steady_clock::now();
+        dispatch_us.push_back(std::chrono::duration<double, std::micro>(submitted - started).count());
+        sync_us.push_back(std::chrono::duration<double, std::micro>(completed - submitted).count());
+        total_us.push_back(std::chrono::duration<double, std::micro>(completed - started).count());
+        if (timing_ready) {
+          float upload = 0, conversion = 0;
+          if (elapsed_time(&upload, timing_events[0], timing_events[1]) == CUDA_SUCCESS &&
+              elapsed_time(&conversion, timing_events[1], timing_events[2]) == CUDA_SUCCESS) {
+            upload_gpu_us.push_back(upload * 1000.0);
+            conversion_gpu_us.push_back(conversion * 1000.0);
+          } else {
+            timing_ready = false;
+            BOOST_LOG(warning) << "Native X11 CUDA event timing unavailable; CPU stage timing retained"sv;
+          }
+        }
       }
-      CU_CHECK(cdf->cuStreamSynchronize(stream.get()), "Couldn't synchronize direct NVENC conversion");
       return 0;
     }
 
   private:
+    void init_timing() {
+      timing_driver = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
+      if (!timing_driver) return;
+      elapsed_time = reinterpret_cast<elapsed_time_fn *>(dlsym(timing_driver, "cuEventElapsedTime"));
+      if (!elapsed_time) return;
+      for (auto &event : timing_events) {
+        if (cdf->cuEventCreate(&event, 0) != CUDA_SUCCESS) return;
+      }
+      timing_ready = true;
+    }
+
+    void record_timing(unsigned index) {
+      if (timing_ready && cdf->cuEventRecord(timing_events[index], stream.get()) != CUDA_SUCCESS) {
+        timing_ready = false;
+        BOOST_LOG(warning) << "Native X11 CUDA event timing unavailable; CPU stage timing retained"sv;
+      }
+    }
+
+    using elapsed_time_fn = CUresult CUDAAPI(float *, CUevent, CUevent);
+    void *timing_driver = nullptr;
+    elapsed_time_fn *elapsed_time = nullptr;
+    CUevent timing_events[3] {};
+    bool timing_ready = false;
+    video::timing_samples_t upload_gpu_us, conversion_gpu_us, dispatch_us, sync_us, total_us;
     struct primary_context_t {
       ~primary_context_t() {
         if (retained && cdf) {
