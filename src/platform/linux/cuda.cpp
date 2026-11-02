@@ -33,7 +33,6 @@ extern "C" {
 #include "src/nvenc/nvenc_cuda_factory.h"
 #include "src/utility.h"
 #include "src/video.h"
-#include "wayland.h"
 
 /**
  * @def SUNSHINE_STRINGVIEW_HELPER(x)

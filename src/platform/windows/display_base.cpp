@@ -40,7 +40,6 @@ typedef enum _D3DKMT_GPU_PREFERENCE_QUERY_STATE : DWORD {
 #include "display.h"
 #include "misc.h"
 #include "src/config.h"
-#include "src/display_device.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/video.h"

@@ -27,9 +27,6 @@
 #include "src/round_robin.h"
 #include "src/utility.h"
 #include "src/video.h"
-#include "vaapi.h"
-#include "vulkan_encode.h"
-#include "wayland.h"
 
 using namespace std::literals;
 namespace fs = std::filesystem;
@@ -445,22 +442,6 @@ namespace platf {
         version_t ver {drmGetVersion(fd.el)};
         BOOST_LOG(info) << path << " -> "sv << ((ver && ver->name) ? ver->name : "UNKNOWN");
 
-        // Open the render node for this card to share with libva.
-        // If it fails, we'll just share the primary node instead.
-        char *rendernode_path = drmGetRenderDeviceNameFromFd(fd.el);
-        if (rendernode_path) {
-          BOOST_LOG(debug) << "Opening render node: "sv << rendernode_path;
-          render_fd.el = open(rendernode_path, O_RDWR);
-          if (render_fd.el < 0) {
-            BOOST_LOG(warning) << "Couldn't open render node: "sv << rendernode_path << ": "sv << strerror(errno);
-            render_fd.el = dup(fd.el);
-          }
-          free(rendernode_path);
-        } else {
-          BOOST_LOG(warning) << "No render device name for: "sv << path;
-          render_fd.el = dup(fd.el);
-        }
-
         if (drmSetClientCap(fd.el, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1)) {
           BOOST_LOG(error) << "GPU driver doesn't support universal planes: "sv << path;
           return -1;
@@ -777,7 +758,6 @@ namespace platf {
       }
 
       file_t fd;  ///< DRM card file descriptor.
-      file_t render_fd;  ///< Render fd.
       plane_res_t plane_res;  ///< Plane res.
     };
 
@@ -918,14 +898,6 @@ namespace platf {
           // Skip non-Nvidia cards when looking for CUDA devices.
           if (mem_type == mem_type_e::cuda && !card.is_nvidia()) {
             BOOST_LOG(debug) << file << " is not a CUDA device"sv;
-            continue;
-          }
-
-          // Skip Nvidia cards if we're looking for VAAPI devices
-          // This is important for hybrid GPU laptops where the display
-          // may be connected through NVIDIA but rendering happens on Intel
-          if (mem_type == mem_type_e::vaapi && card.is_nvidia()) {
-            BOOST_LOG(debug) << file << " is an NVIDIA card, skipping for VAAPI"sv;
             continue;
           }
 
@@ -1565,12 +1537,6 @@ namespace platf {
        * @return Constructed AVCodec encode device object.
        */
       std::unique_ptr<avcodec_encode_device_t> make_avcodec_encode_device(pix_fmt_e pix_fmt) override {
-#ifdef SUNSHINE_BUILD_VAAPI
-        if (mem_type == mem_type_e::vaapi) {
-          return va::make_avcodec_encode_device(width, height, false);
-        }
-#endif
-
 #ifdef SUNSHINE_BUILD_CUDA
         if (mem_type == mem_type_e::cuda) {
           return cuda::make_avcodec_encode_device(width, height, false);
@@ -1737,18 +1703,6 @@ namespace platf {
        * @return Constructed AVCodec encode device object.
        */
       std::unique_ptr<avcodec_encode_device_t> make_avcodec_encode_device(pix_fmt_e pix_fmt) override {
-#ifdef SUNSHINE_BUILD_VAAPI
-        if (mem_type == mem_type_e::vaapi) {
-          return va::make_avcodec_encode_device(width, height, dup(card.render_fd.el), img_offset_x, img_offset_y, true);
-        }
-#endif
-
-#ifdef SUNSHINE_BUILD_VULKAN
-        if (mem_type == mem_type_e::vulkan) {
-          return vk::make_avcodec_encode_device_vram(width, height, img_offset_x, img_offset_y);
-        }
-#endif
-
 #ifdef SUNSHINE_BUILD_CUDA
         if (mem_type == mem_type_e::cuda) {
           return cuda::make_avcodec_gl_encode_device(width, height, img_offset_x, img_offset_y);
@@ -1897,13 +1851,6 @@ namespace platf {
           return -1;
         }
 
-#ifdef SUNSHINE_BUILD_VAAPI
-        if (mem_type == mem_type_e::vaapi && !va::validate(card.render_fd.el)) {
-          BOOST_LOG(warning) << "Monitor "sv << display_name << " doesn't support hardware encoding. Reverting back to GPU -> RAM -> GPU"sv;
-          return -1;
-        }
-#endif
-
 #ifndef SUNSHINE_BUILD_CUDA
         if (mem_type == mem_type_e::cuda) {
           BOOST_LOG(warning) << "Attempting to use NVENC without CUDA support. Reverting back to GPU -> RAM -> GPU"sv;
@@ -1928,14 +1875,14 @@ namespace platf {
    * @return KMS display backend, or nullptr when initialization fails.
    */
   std::shared_ptr<display_t> kms_display(mem_type_e hwdevice_type, const std::string &display_name, const ::video::config_t &config) {
-    if (hwdevice_type == mem_type_e::vaapi || hwdevice_type == mem_type_e::cuda || hwdevice_type == mem_type_e::vulkan) {
+    if (hwdevice_type == mem_type_e::cuda) {
       auto disp = std::make_shared<kms::display_vram_t>(hwdevice_type);
 
       if (!disp->init(display_name, config)) {
         return disp;
       }
 
-      // In the case of failure, attempt the old method for VAAPI
+      // Fall back to the shared system-memory conversion path.
     }
 
     auto disp = std::make_shared<kms::display_ram_t>(hwdevice_type);
@@ -1945,72 +1892,6 @@ namespace platf {
     }
 
     return disp;
-  }
-
-  /**
-   * On Wayland, it's not possible to determine the position of the monitor on the desktop with KMS.
-   * Wayland does allow applications to query attached monitors on the desktop,
-   * however, the naming scheme is not standardized across implementations.
-   *
-   * As a result, correlating the KMS output to the wayland outputs is guess work at best.
-   * But, it's necessary for absolute mouse coordinates to work.
-   *
-   * This is an ugly hack :(
-   * @param cds Capture display state used by the KMS backend.
-   */
-  void correlate_to_wayland(std::vector<kms::card_descriptor_t> &cds) {
-    auto monitors = wl::monitors();
-
-    BOOST_LOG(info) << "-------- Start of KMS monitor list --------"sv;
-
-    for (auto &monitor : monitors) {
-      std::string_view name = monitor->name;
-
-      // Try to convert names in the format:
-      // {type}-{index}
-      // {index} is n'th occurrence of {type}
-      auto index_begin = name.find_last_of('-');
-
-      std::uint32_t index;
-      if (index_begin == std::string_view::npos) {
-        index = 1;
-      } else {
-        index = std::max<int64_t>(1, util::from_view(name.substr(index_begin + 1)));
-      }
-
-      auto type = kms::from_view(name.substr(0, index_begin));
-
-      for (auto &card_descriptor : cds) {
-        for (auto &[_, monitor_descriptor] : card_descriptor.crtc_to_monitor) {
-          if (monitor_descriptor.index == index && monitor_descriptor.type == type) {
-            monitor_descriptor.viewport.offset_x = monitor->viewport.offset_x;
-            monitor_descriptor.viewport.offset_y = monitor->viewport.offset_y;
-            monitor_descriptor.viewport.logical_width = monitor->viewport.logical_width;
-            monitor_descriptor.viewport.logical_height = monitor->viewport.logical_height;
-
-            // A sanity check, it's guesswork after all.
-            if (
-              monitor_descriptor.viewport.width != monitor->viewport.width ||
-              monitor_descriptor.viewport.height != monitor->viewport.height
-            ) {
-              BOOST_LOG(warning)
-                << "Mismatch on expected Resolution compared to actual resolution: "sv
-                << monitor_descriptor.viewport.width << 'x' << monitor_descriptor.viewport.height
-                << " vs "sv
-                << monitor->viewport.width << 'x' << monitor->viewport.height;
-            }
-
-            BOOST_LOG(info) << "Monitor " << monitor_descriptor.monitor_index << " is "sv << name << ": "sv << monitor->description;
-            goto break_for_loop;
-          }
-        }
-      }
-    break_for_loop:
-
-      BOOST_LOG(verbose) << "Reduced to name: "sv << name << ": "sv << index;
-    }
-
-    BOOST_LOG(info) << "--------- End of KMS monitor list ---------"sv;
   }
 
   // A list of names of displays accepted as display_name
@@ -2055,14 +1936,6 @@ namespace platf {
       // Skip non-Nvidia cards when looking for CUDA devices.
       if (hwdevice_type == mem_type_e::cuda && !card.is_nvidia()) {
         BOOST_LOG(debug) << file << " is not a CUDA device"sv;
-        continue;
-      }
-
-      // Skip Nvidia cards if we're looking for VAAPI devices
-      // This is important for hybrid GPU laptops where the display
-      // may be connected through NVIDIA but rendering happens on Intel
-      if (hwdevice_type == mem_type_e::vaapi && card.is_nvidia()) {
-        BOOST_LOG(debug) << file << " is an NVIDIA card, skipping for VAAPI"sv;
         continue;
       }
 
@@ -2120,10 +1993,6 @@ namespace platf {
         std::move(file),
         std::move(crtc_to_monitor),
       });
-    }
-
-    if (!wl::init()) {
-      correlate_to_wayland(cds);
     }
 
     // Deduce the full virtual desktop size

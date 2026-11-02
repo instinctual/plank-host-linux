@@ -302,11 +302,9 @@ namespace platf {
    */
   enum class mem_type_e {
     system,  ///< System memory
-    vaapi,  ///< VAAPI
     dxgi,  ///< DXGI
     cuda,  ///< CUDA
     videotoolbox,  ///< VideoToolbox
-    vulkan,  ///< Vulkan
     unknown  ///< Unknown
   };
 

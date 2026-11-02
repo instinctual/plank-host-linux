@@ -14,9 +14,6 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/Simple-Web-Server")
 # Common helpers and the Host-owned test framework.
 include("${CMAKE_CURRENT_LIST_DIR}/lizardbyte_common.cmake")
 
-# libdisplaydevice
-add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libdisplaydevice")
-
 # common dependencies
 include("${CMAKE_MODULE_PATH}/dependencies/nv_codec_headers.cmake")
 include("${CMAKE_MODULE_PATH}/dependencies/nlohmann_json.cmake")

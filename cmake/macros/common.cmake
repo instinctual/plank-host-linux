@@ -9,8 +9,6 @@ elseif(UNIX)
 
     if(APPLE)
         include(${CMAKE_MODULE_PATH}/macros/macos.cmake)
-    else()
-        include(${CMAKE_MODULE_PATH}/macros/linux.cmake)
     endif()
 endif()
 

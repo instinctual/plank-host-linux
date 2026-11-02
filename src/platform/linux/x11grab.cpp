@@ -36,7 +36,6 @@
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/video.h"
-#include "vaapi.h"
 #include "x11grab.h"
 #include "x11_worker_exit.h"
 
@@ -954,11 +953,6 @@ namespace platf {
      * @return Constructed AVCodec encode device object.
      */
     std::unique_ptr<avcodec_encode_device_t> make_avcodec_encode_device(pix_fmt_e pix_fmt) override {
-#ifdef SUNSHINE_BUILD_VAAPI
-      if (mem_type == mem_type_e::vaapi) {
-        return va::make_avcodec_encode_device(width, height, false);
-      }
-#endif
 
 #ifdef SUNSHINE_BUILD_CUDA
       if (mem_type == mem_type_e::cuda) {
@@ -1277,7 +1271,7 @@ namespace platf {
    * @return X11 display backend, or nullptr when initialization fails.
    */
   std::shared_ptr<display_t> x11_display(platf::mem_type_e hwdevice_type, const std::string &display_name, const ::video::config_t &config) {
-    if (hwdevice_type != platf::mem_type_e::system && hwdevice_type != platf::mem_type_e::vaapi && hwdevice_type != platf::mem_type_e::cuda) {
+    if (hwdevice_type != platf::mem_type_e::system && hwdevice_type != platf::mem_type_e::cuda) {
       BOOST_LOG(error) << "Could not initialize x11 display with the given hw device type"sv;
       return nullptr;
     }

@@ -14,8 +14,6 @@ option(PLANK_ENABLE_TRANSPORT
 set(PLANK_TRANSPORT_DIR "" CACHE PATH
         "Path to the PLANK transport Rust transport crate.")
 
-option(SUNSHINE_SYSTEM_VULKAN_HEADERS "Use system installation of vulkan-headers rather than the submodule." OFF)
-option(SUNSHINE_SYSTEM_WAYLAND_PROTOCOLS "Use system installation of wayland-protocols rather than the submodule." OFF)
 
 option(BOOST_USE_STATIC "Use static boost libraries." ON)
 
@@ -30,16 +28,6 @@ if(UNIX)
             "Enable cuda specific code." ON)
     option(SUNSHINE_ENABLE_DRM
             "Enable KMS grab if available." ON)
-    option(SUNSHINE_ENABLE_VAAPI
-            "Enable building vaapi specific code." ON)
-    option(SUNSHINE_ENABLE_VULKAN
-            "Enable Vulkan video encoding." ON)
-    option(SUNSHINE_ENABLE_WAYLAND
-            "Enable building wayland specific code." ON)
     option(SUNSHINE_ENABLE_X11
             "Enable X11 grab if available." ON)
-    option(SUNSHINE_ENABLE_KWIN
-            "Enable KWin ScreenCast grab if available" ON)
-    option(SUNSHINE_ENABLE_PORTAL
-            "Enable XDG portal grab if available" ON)
 endif()

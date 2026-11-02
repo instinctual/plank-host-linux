@@ -60,7 +60,6 @@
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/video.h"
-#include "vaapi.h"
 
 #ifdef __GNUC__
   #define SUNSHINE_GNUC_EXTENSION __extension__
@@ -1005,20 +1004,11 @@ namespace platf {
 #ifdef SUNSHINE_BUILD_CUDA
       NVFBC,  ///< NvFBC
 #endif
-#ifdef SUNSHINE_BUILD_WAYLAND
-      WAYLAND,  ///< Wayland
-#endif
 #ifdef SUNSHINE_BUILD_DRM
       KMS,  ///< KMS
 #endif
 #ifdef SUNSHINE_BUILD_X11
       X11,  ///< X11
-#endif
-#ifdef SUNSHINE_BUILD_KWIN
-      KWIN,  ///< KWin ScreenCast
-#endif
-#ifdef SUNSHINE_BUILD_PORTAL
-      PORTAL,  ///< XDG PORTAL
 #endif
       MAX_FLAGS  ///< The maximum number of flags
     };
@@ -1049,33 +1039,6 @@ namespace platf {
   }
 #endif
 
-#ifdef SUNSHINE_BUILD_WAYLAND
-  /**
-   * @brief Enumerate displays available through the Wayland capture backend.
-   *
-   * @return Wayland display names, or an empty list when discovery fails.
-   */
-  std::vector<std::string> wl_display_names();
-  /**
-   * @brief Create a Wayland display capture backend.
-   *
-   * @param hwdevice_type Hardware device type requested for capture or encode.
-   * @param display_name Display name.
-   * @param config Configuration values to apply.
-   * @return Display backend, or nullptr when Wayland capture initialization fails.
-   */
-  std::shared_ptr<display_t> wl_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
-
-  /**
-   * @brief Check whether Wayland capture is available for the current session.
-   *
-   * @return True when the active window system is Wayland and at least one output is discoverable.
-   */
-  bool verify_wl() {
-    return window_system == window_system_e::WAYLAND && !wl_display_names().empty();
-  }
-#endif
-
 #ifdef SUNSHINE_BUILD_DRM
   std::vector<std::string> kms_display_names(mem_type_e hwdevice_type);
   std::shared_ptr<display_t> kms_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
@@ -1095,26 +1058,6 @@ namespace platf {
   }
 #endif
 
-#ifdef SUNSHINE_BUILD_PORTAL
-  std::vector<std::string> portal_display_names();
-  std::shared_ptr<display_t> portal_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
-
-  bool verify_portal() {
-    return !portal_display_names().empty();
-  }
-#endif
-
-#ifdef SUNSHINE_BUILD_KWIN
-  bool kwin_available();
-  std::vector<std::string> kwin_display_names();
-  std::shared_ptr<display_t> kwin_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
-
-  bool verify_kwin() {
-    // Note: The separate kwin_available check is necessary because with CAP_SYS_ADMIN kwin_display_names is never empty during startup
-    return window_system == window_system_e::WAYLAND && kwin_available() && !kwin_display_names().empty();
-  }
-#endif
-
   /**
    * @brief List display names accepted by the selected capture backend.
    */
@@ -1125,11 +1068,6 @@ namespace platf {
       return nvfbc_display_names();
     }
 #endif
-#ifdef SUNSHINE_BUILD_WAYLAND
-    if (sources[source::WAYLAND]) {
-      return wl_display_names();
-    }
-#endif
 #ifdef SUNSHINE_BUILD_DRM
     if (sources[source::KMS]) {
       return kms_display_names(hwdevice_type);
@@ -1138,16 +1076,6 @@ namespace platf {
 #ifdef SUNSHINE_BUILD_X11
     if (sources[source::X11]) {
       return x11_display_names();
-    }
-#endif
-#ifdef SUNSHINE_BUILD_PORTAL
-    if (sources[source::PORTAL]) {
-      return portal_display_names();
-    }
-#endif
-#ifdef SUNSHINE_BUILD_KWIN
-    if (sources[source::KWIN]) {
-      return kwin_display_names();
     }
 #endif
     return {};
@@ -1233,24 +1161,6 @@ namespace platf {
       return nvfbc_display(hwdevice_type, display_name, config);
     }
 #endif
-#ifdef SUNSHINE_BUILD_WAYLAND
-    if (sources[source::WAYLAND]) {
-      BOOST_LOG(info) << "Screencasting with Wayland's protocol"sv;
-      return wl_display(hwdevice_type, display_name, config);
-    }
-#endif
-#ifdef SUNSHINE_BUILD_PORTAL
-    if (sources[source::PORTAL]) {
-      BOOST_LOG(info) << "Screencasting with XDG portal"sv;
-      return portal_display(hwdevice_type, display_name, config);
-    }
-#endif
-#ifdef SUNSHINE_BUILD_KWIN
-    if (sources[source::KWIN]) {
-      BOOST_LOG(info) << "Screencasting with KWin ScreenCast"sv;
-      return kwin_display(hwdevice_type, display_name, config);
-    }
-#endif
 
     return nullptr;
   }
@@ -1259,26 +1169,12 @@ namespace platf {
    * @brief Initialize the Linux high-precision timer file descriptor.
    */
   std::unique_ptr<deinit_t> init() {
-    // enable low latency mode for AMD
-    // https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/30039
-    lizardbyte::common::set_env("AMD_DEBUG", "lowlatencyenc");
-
-    // enable Vulkan video extensions for AMD RADV
-    lizardbyte::common::set_env("RADV_PERFTEST", "video_encode");
-    // Above is deprecated on Mesa 26.1+ and replaced by (keep both to ensure best compatibility):
-    lizardbyte::common::append_env("RADV_EXPERIMENTAL", "video_encode", ",");
-
     // These are allowed to fail.
     gbm::init();
 
     window_system = window_system_e::NONE;
-#ifdef SUNSHINE_BUILD_WAYLAND
-    if (std::string v; lizardbyte::common::get_env("WAYLAND_DISPLAY", v)) {
-      window_system = window_system_e::WAYLAND;
-    }
-#endif
 #if defined(SUNSHINE_BUILD_X11) || defined(SUNSHINE_BUILD_CUDA)
-    if (std::string v; lizardbyte::common::get_env("DISPLAY", v) && window_system != window_system_e::WAYLAND) {
+    if (std::string v; lizardbyte::common::get_env("DISPLAY", v)) {
       if (lizardbyte::common::get_env("WAYLAND_DISPLAY", v)) {
         BOOST_LOG(warning) << "Wayland detected, yet sunshine will use X11 for screencasting, screencasting will only work on XWayland applications"sv;
       }
@@ -1294,11 +1190,6 @@ namespace platf {
       sources[source::NVFBC] = true;
     }
 #endif
-#ifdef SUNSHINE_BUILD_WAYLAND
-    if (sources.none() && verify_wl()) {
-      sources[source::WAYLAND] = true;
-    }
-#endif
 #ifdef SUNSHINE_BUILD_DRM
     if (sources.none() && verify_kms()) {
       sources[source::KMS] = true;
@@ -1309,16 +1200,6 @@ namespace platf {
     // needed as a software-encoder fallback. Always discover it on X11.
     if (verify_x11()) {
       sources[source::X11] = true;
-    }
-#endif
-#ifdef SUNSHINE_BUILD_PORTAL
-    if (verify_portal()) {
-      sources[source::PORTAL] = true;
-    }
-#endif
-#ifdef SUNSHINE_BUILD_KWIN
-    if (sources.none() && verify_kwin()) {
-      sources[source::KWIN] = true;
     }
 #endif
 

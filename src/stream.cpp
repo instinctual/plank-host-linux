@@ -19,7 +19,6 @@ extern "C" {
 // local includes
 #include "config.h"
 #include "clipboard_protocol.h"
-#include "display_device.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -1340,16 +1339,6 @@ namespace stream {
 
       // If this is the last session, invoke the platform callbacks
       if (--running_sessions == 0) {
-        bool revert_display_config {config::video.dd.config_revert_on_disconnect};
-        if (!proc::proc.running()) {
-          // We have no app running and also no clients anymore.
-          revert_display_config = true;
-        }
-
-        if (revert_display_config) {
-          display_device::revert_configuration();
-        }
-
         platf::streaming_will_stop();
         if (session.plank_display_lease) {
           const auto released = plank::session::release_display_lease(

@@ -74,10 +74,8 @@ if(CUDA_FOUND)
     add_compile_definitions(SUNSHINE_BUILD_CUDA)
 endif()
 
-# libdrm is required for DRM (KMS). Only the headers are required for Wayland,
-# Vulkan, and PipeWire (KWin, Portal).
-if(${SUNSHINE_ENABLE_DRM} OR ${SUNSHINE_ENABLE_WAYLAND} OR ${SUNSHINE_ENABLE_VULKAN}
-   OR ${SUNSHINE_ENABLE_KWIN} OR ${SUNSHINE_ENABLE_PORTAL})
+# DRM/KMS helpers share the capture device with CUDA.
+if(${SUNSHINE_ENABLE_DRM})
     find_package(LIBDRM REQUIRED)
 else()
     set(LIBDRM_FOUND OFF)
@@ -102,126 +100,6 @@ endif()
 
 # evdev
 include(dependencies/libevdev_Sunshine)
-
-# vaapi
-if(${SUNSHINE_ENABLE_VAAPI})
-    find_package(Libva REQUIRED)
-else()
-    set(LIBVA_FOUND OFF)
-endif()
-if(LIBVA_FOUND)
-    add_compile_definitions(SUNSHINE_BUILD_VAAPI)
-    include_directories(SYSTEM ${LIBVA_INCLUDE_DIR})
-    list(APPEND PLATFORM_LIBRARIES ${LIBVA_LIBRARIES} ${LIBVA_DRM_LIBRARIES})
-    list(APPEND PLATFORM_TARGET_FILES
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/vaapi.h"
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/vaapi.cpp")
-endif()
-
-# vulkan video encoding (via FFmpeg)
-if(${SUNSHINE_ENABLE_VULKAN})
-    if(NOT SUNSHINE_SYSTEM_VULKAN_HEADERS)
-        # use Vulkan headers from build-deps submodule (system headers may be too old, e.g. Ubuntu 22.04)
-        set(VULKAN_HEADERS_DIR "${CMAKE_SOURCE_DIR}/third-party/build-deps/third-party/FFmpeg/Vulkan-Headers/include")
-    else()
-        find_package(VulkanHeaders REQUIRED)
-        get_target_property(VULKAN_HEADERS_DIR Vulkan::Headers INTERFACE_INCLUDE_DIRECTORIES)
-    endif()
-
-    if(NOT EXISTS "${VULKAN_HEADERS_DIR}/vulkan/vulkan.h")
-        message(FATAL_ERROR "Vulkan headers not found in build-deps submodule")
-    endif()
-
-    find_library(VULKAN_LIBRARY NAMES vulkan vulkan-1)
-    if(NOT VULKAN_LIBRARY)
-        message(FATAL_ERROR "libvulkan not found")
-    endif()
-
-    # prefer glslc, fall back to glslangValidator
-    find_program(GLSLC_EXECUTABLE glslc)
-    if(NOT GLSLC_EXECUTABLE)
-        find_program(GLSLANG_EXECUTABLE glslangValidator)
-    endif()
-    if(NOT GLSLC_EXECUTABLE AND NOT GLSLANG_EXECUTABLE)
-        message(FATAL_ERROR "Vulkan shader compiler not found (need glslc or glslangValidator)")
-    endif()
-
-    list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_BUILD_VULKAN=1)
-    include_directories(SYSTEM ${VULKAN_HEADERS_DIR})
-    list(APPEND PLATFORM_LIBRARIES ${VULKAN_LIBRARY})
-    list(APPEND PLATFORM_TARGET_FILES
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/vulkan_encode.h"
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/vulkan_encode.cpp")
-
-    # compile GLSL -> SPIR-V -> C include at build time
-    set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/generated-src/shaders")
-    set(VULKAN_SHADER_SOURCE "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/assets/shaders/vulkan/rgb2yuv.comp")
-    set(VULKAN_SHADER_SPV "${VULKAN_SHADER_DIR}/rgb2yuv.spv")
-    set(VULKAN_SHADER_DATA "${VULKAN_SHADER_DIR}/rgb2yuv.spv.inc")
-
-    file(MAKE_DIRECTORY "${VULKAN_SHADER_DIR}")
-
-    if(GLSLC_EXECUTABLE)
-        add_custom_command(
-                OUTPUT "${VULKAN_SHADER_SPV}"
-                COMMAND ${GLSLC_EXECUTABLE} -O "${VULKAN_SHADER_SOURCE}" -o "${VULKAN_SHADER_SPV}"
-                DEPENDS "${VULKAN_SHADER_SOURCE}"
-                COMMENT "Compiling Vulkan shader rgb2yuv.comp (glslc)"
-                VERBATIM)
-    else()
-        add_custom_command(
-                OUTPUT "${VULKAN_SHADER_SPV}"
-                COMMAND ${GLSLANG_EXECUTABLE} -V -o "${VULKAN_SHADER_SPV}" "${VULKAN_SHADER_SOURCE}"
-                DEPENDS "${VULKAN_SHADER_SOURCE}"
-                COMMENT "Compiling Vulkan shader rgb2yuv.comp (glslangValidator)"
-                VERBATIM)
-    endif()
-
-    add_custom_command(
-            OUTPUT "${VULKAN_SHADER_DATA}"
-            COMMAND ${CMAKE_COMMAND} -DSPV_FILE=${VULKAN_SHADER_SPV} -DOUT_FILE=${VULKAN_SHADER_DATA}
-                -P "${CMAKE_SOURCE_DIR}/cmake/scripts/binary_to_c.cmake"
-            DEPENDS "${VULKAN_SHADER_SPV}"
-            COMMENT "Generating C include from rgb2yuv.spv"
-            VERBATIM)
-
-    add_custom_target(vulkan_shaders
-            DEPENDS "${VULKAN_SHADER_DATA}"
-            COMMENT "Vulkan shader compilation")
-    set(SUNSHINE_TARGET_DEPENDENCIES ${SUNSHINE_TARGET_DEPENDENCIES} vulkan_shaders)
-endif()
-
-# wayland
-if(${SUNSHINE_ENABLE_WAYLAND})
-    find_package(Wayland REQUIRED)
-else()
-    set(WAYLAND_FOUND OFF)
-endif()
-if(WAYLAND_FOUND)
-    add_compile_definitions(SUNSHINE_BUILD_WAYLAND)
-
-    if(NOT SUNSHINE_SYSTEM_WAYLAND_PROTOCOLS)
-        set(WAYLAND_PROTOCOLS_DIR "${CMAKE_SOURCE_DIR}/third-party/wayland-protocols")
-    else()
-        pkg_get_variable(WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
-        pkg_check_modules(WAYLAND_PROTOCOLS wayland-protocols REQUIRED)
-    endif()
-
-    GEN_WAYLAND("${WAYLAND_PROTOCOLS_DIR}" "unstable/xdg-output" xdg-output-unstable-v1)
-    GEN_WAYLAND("${WAYLAND_PROTOCOLS_DIR}" "unstable/linux-dmabuf" linux-dmabuf-unstable-v1)
-    GEN_WAYLAND("${CMAKE_SOURCE_DIR}/third-party/wlr-protocols" "unstable" wlr-screencopy-unstable-v1)
-
-    include_directories(
-            SYSTEM
-            ${WAYLAND_INCLUDE_DIRS}
-    )
-
-    list(APPEND PLATFORM_LIBRARIES ${WAYLAND_LIBRARIES} gbm)
-    list(APPEND PLATFORM_TARGET_FILES
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/wlgrab.cpp"
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/wayland.h"
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/wayland.cpp")
-endif()
 
 # x11
 if(${SUNSHINE_ENABLE_X11})
@@ -252,49 +130,8 @@ if(GIO_FOUND)
     list(APPEND PLATFORM_LIBRARIES ${GIO_LIBRARIES})
 endif()
 
-# Pipewire
-if(${SUNSHINE_ENABLE_KWIN} OR ${SUNSHINE_ENABLE_PORTAL})
-    pkg_check_modules(PIPEWIRE libpipewire-0.3 REQUIRED)
-else()
-    set(PIPEWIRE_FOUND OFF)
-endif()
-if(PIPEWIRE_FOUND)
-    include_directories(SYSTEM ${PIPEWIRE_INCLUDE_DIRS})
-    list(APPEND PLATFORM_LIBRARIES ${PIPEWIRE_LIBRARIES})
-    list(APPEND PLATFORM_TARGET_FILES
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/pipewire.cpp")
-endif()
-
-# XDG portal
-set(PORTAL_FOUND OFF)
-if(PIPEWIRE_FOUND AND GIO_FOUND AND ${SUNSHINE_ENABLE_PORTAL})
-    set(PORTAL_FOUND ON)
-    add_compile_definitions(SUNSHINE_BUILD_PORTAL)
-    list(APPEND PLATFORM_TARGET_FILES
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/portalgrab.cpp")
-endif()
-
-# KWin ScreenCast (direct Wayland protocol, bypasses portal)
-set(KWIN_FOUND OFF)
-if(PIPEWIRE_FOUND AND WAYLAND_FOUND AND ${SUNSHINE_ENABLE_KWIN})
-    set(KWIN_FOUND ON)
-    add_compile_definitions(SUNSHINE_BUILD_KWIN)
-    GEN_WAYLAND("${CMAKE_SOURCE_DIR}/third-party/plasma-wayland-protocols/src/protocols" "" kde-output-order-v1)
-    GEN_WAYLAND("${CMAKE_SOURCE_DIR}/third-party/plasma-wayland-protocols/src/protocols" "" zkde-screencast-unstable-v1)
-    list(APPEND PLATFORM_TARGET_FILES
-            "${CMAKE_SOURCE_DIR}/src/platform/linux/kwingrab.cpp")
-elseif(${SUNSHINE_ENABLE_KWIN} AND NOT WAYLAND_FOUND)
-    message(FATAL_ERROR "SUNSHINE_ENABLE_KWIN requires SUNSHINE_ENABLE_WAYLAND — KWin capture disabled")
-endif()
-
-if(NOT ${CUDA_FOUND}
-        AND NOT ${LIBDRM_FOUND}
-        AND NOT ${LIBVA_FOUND}
-        AND NOT ${KWIN_FOUND}
-        AND NOT ${PORTAL_FOUND}
-        AND NOT ${WAYLAND_FOUND}
-        AND NOT ${X11_FOUND})
-    message(FATAL_ERROR "Couldn't find either cuda, libdrm, libva, kwin, pipewire, portal, wayland or x11")
+if(NOT CUDA_FOUND AND NOT LIBDRM_FOUND AND NOT X11_FOUND)
+    message(FATAL_ERROR "No supported Linux capture backend found (CUDA, DRM or X11)")
 endif()
 
 # These need to be set before common.cmake adds the libvirtualhid subdirectory in order for them to be picked up

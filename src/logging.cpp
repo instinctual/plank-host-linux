@@ -26,8 +26,6 @@
 // conditional includes
 #ifdef __ANDROID__
   #include <android/log.h>
-#else
-  #include <display_device/logging.h>
 #endif
 
 extern "C" {
@@ -261,7 +259,6 @@ namespace logging {
 
 #ifndef __ANDROID__
     setup_av_logging(min_log_level);
-    setup_libdisplaydevice_logging(min_log_level);
 #endif
 
     sink = boost::make_shared<text_sink>();
@@ -325,35 +322,6 @@ namespace logging {
     });
   }
 
-  void setup_libdisplaydevice_logging(int min_log_level) {
-    constexpr int min_level {static_cast<int>(display_device::Logger::LogLevel::verbose)};
-    constexpr int max_level {static_cast<int>(display_device::Logger::LogLevel::fatal)};
-    const auto log_level {static_cast<display_device::Logger::LogLevel>(std::min(std::max(min_level, min_log_level), max_level))};
-
-    display_device::Logger::get().setLogLevel(log_level);
-    display_device::Logger::get().setCustomCallback([](const display_device::Logger::LogLevel level, const std::string &message) {
-      switch (level) {
-        case display_device::Logger::LogLevel::verbose:
-          BOOST_LOG(verbose) << message;
-          break;
-        case display_device::Logger::LogLevel::debug:
-          BOOST_LOG(debug) << message;
-          break;
-        case display_device::Logger::LogLevel::info:
-          BOOST_LOG(info) << message;
-          break;
-        case display_device::Logger::LogLevel::warning:
-          BOOST_LOG(warning) << message;
-          break;
-        case display_device::Logger::LogLevel::error:
-          BOOST_LOG(error) << message;
-          break;
-        case display_device::Logger::LogLevel::fatal:
-          BOOST_LOG(fatal) << message;
-          break;
-      }
-    });
-  }
 #endif
 
   void log_flush() {

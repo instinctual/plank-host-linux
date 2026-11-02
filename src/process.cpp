@@ -4,7 +4,6 @@
  */
 
 // local includes
-#include "display_device.h"
 #include "logging.h"
 #include "process.h"
 
@@ -48,10 +47,7 @@ namespace proc {
   }
 
   void proc_t::terminate() {
-    const int previous_app_id = _app_id.exchange(0, std::memory_order_acq_rel);
-    if (previous_app_id != 0) {
-      display_device::revert_configuration();
-    }
+    _app_id.store(0, std::memory_order_release);
   }
 
   std::unique_ptr<platf::deinit_t> init() {

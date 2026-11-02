@@ -34,7 +34,6 @@ extern "C" {
 // local includes
 #include "cbs.h"
 #include "config.h"
-#include "display_device.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -178,37 +177,6 @@ namespace video {
       std::optional<std::chrono::steady_clock::time_point> last_packet_ready;
       bool native10;
     };
-  }  // namespace
-
-  namespace {
-    /**
-     * @brief Check if we can allow probing for the encoders.
-     * @return True if there should be no issues with the probing, false if we should prevent it.
-     */
-    bool allow_encoder_probing() {
-      const auto devices {display_device::enumerate_devices()};
-
-      // If there are no devices, then either the API is not working correctly or OS does not support the lib.
-      // Either way we should not block the probing in this case as we can't tell what's wrong.
-      if (devices.empty()) {
-        return true;
-      }
-
-      // Since Windows 11 24H2, it is possible that there will be no active devices present
-      // for some reason (probably a bug). Trying to probe encoders in such a state locks/breaks the DXGI
-      // and also the display device for Windows. So we must have at least 1 active device.
-      const bool at_least_one_device_is_active = std::any_of(std::begin(devices), std::end(devices), [](const auto &device) {
-        // If device has additional info, it is active.
-        return static_cast<bool>(device.m_info);
-      });
-
-      if (at_least_one_device_is_active) {
-        return true;
-      }
-
-      BOOST_LOG(error) << "No display devices are active at the moment! Cannot probe the encoders.";
-      return false;
-    }
   }  // namespace
 
   /**
@@ -1431,7 +1399,7 @@ namespace video {
     }
 
     // It is possible that the output name may be empty even if it wasn't before (device disconnected) or vice-versa
-    const auto output_name {display_device::map_output_name(preferred_output_name)};
+    const auto output_name {preferred_output_name};
     std::string current_display_name;
 
     // If we have a current display index, let's start with that
@@ -3530,10 +3498,6 @@ namespace video {
   }
 
   int probe_encoders() {
-    if (!allow_encoder_probing()) {
-      // Error already logged
-      return -1;
-    }
 
     // If we already have a good encoder, check to see if another probe is required
     if (chosen_encoder && !(chosen_encoder->flags & ALWAYS_REPROBE) && !platf::needs_encoder_reenumeration()) {
@@ -3765,12 +3729,6 @@ namespace video {
     switch (type) {
       case AV_HWDEVICE_TYPE_D3D11VA:
         return platf::mem_type_e::dxgi;
-      case AV_HWDEVICE_TYPE_VAAPI:
-        return platf::mem_type_e::vaapi;
-#ifdef SUNSHINE_BUILD_VULKAN
-      case AV_HWDEVICE_TYPE_VULKAN:
-        return platf::mem_type_e::vulkan;
-#endif
       case AV_HWDEVICE_TYPE_CUDA:
         return platf::mem_type_e::cuda;
       case AV_HWDEVICE_TYPE_NONE:

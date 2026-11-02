@@ -45,7 +45,6 @@
 #include "auth/auth_executor.h"
 #include "auth/web_auth.h"
 #include "config.h"
-#include "display_device.h"
 #include "globals.h"
 #include "httpcommon.h"
 #include "logging.h"
@@ -1324,7 +1323,6 @@ namespace nvhttp {
     std::scoped_lock session_start_lock {session_start_mutex};
 
     pt::ptree tree;
-    bool revert_display_configuration {false};
     auto g = util::fail_guard([&]() {
       std::ostringstream data;
 
@@ -1335,10 +1333,6 @@ namespace nvhttp {
       pt::write_xml(data, tree);
       response->write(data.str());
       response->close_connection_after_response = true;
-
-      if (revert_display_configuration) {
-        display_device::revert_configuration();
-      }
     });
 
     auto args = request->parse_query_string();
@@ -1444,14 +1438,6 @@ namespace nvhttp {
         tree.put("root.gamesession", 0);
         return;
       }
-      // The display should be restored in case something fails as there are no other sessions.
-      revert_display_configuration = true;
-
-      // We want to prepare display only if there are no active sessions at
-      // the moment. This should be done before probing encoders as it could
-      // change the active displays.
-      display_device::configure_display(config::video, *launch_session);
-
       // The media worker probes capture and encoding before its HTTP interface
       // starts. Reprobing here can race a reconnecting NvFBC capture thread.
     }
@@ -1492,7 +1478,6 @@ namespace nvhttp {
     session_stream::launch_session_raise(launch_session);
 
     // Stream was started successfully, we will revert the config when the app or session terminates
-    revert_display_configuration = false;
   }
 
   /**
@@ -1606,10 +1591,6 @@ namespace nvhttp {
         tree.put("root.resume", 0);
         return;
       }
-      // We want to prepare display only if there are no active sessions at
-      // the moment. This should be done before probing encoders as it could
-      // change the active displays.
-      display_device::configure_display(config::video, *launch_session);
 
       // Worker startup probing remains authoritative; avoid racing NvFBC
       // probing with a prior stream's capture teardown.

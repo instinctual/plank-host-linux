@@ -16,15 +16,6 @@ if(NOT WIN32)
     list(APPEND BOOST_COMPONENTS locale)
 endif()
 
-# algorithm, preprocessor, scope, and uuid are not used by Sunshine, but by libdisplaydevice, added here for convenience
-if(WIN32)
-    list(APPEND BOOST_COMPONENTS
-            algorithm
-            preprocessor
-            scope
-            uuid
-    )
-endif()
 
 if(BOOST_USE_STATIC)
     set(Boost_USE_STATIC_LIBS ON)  # cmake-lint: disable=C0103

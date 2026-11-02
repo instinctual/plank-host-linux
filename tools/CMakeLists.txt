@@ -25,7 +25,6 @@ target_link_libraries(dxgi-info
         ${CMAKE_THREAD_LIBS_INIT}
         ${FFMPEG_LIBRARIES}  # this is included only for logging
         dxgi
-        libdisplaydevice::display_device  # this is included only for logging
         ${PLATFORM_LIBRARIES}
 )
 target_compile_options(dxgi-info PRIVATE ${SUNSHINE_COMPILE_OPTIONS})
@@ -35,7 +34,6 @@ target_link_libraries(audio-info
         ${Boost_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
         ${FFMPEG_LIBRARIES}  # this is included only for logging
-        libdisplaydevice::display_device  # this is included only for logging
         ksuser
         ${PLATFORM_LIBRARIES}
 )
