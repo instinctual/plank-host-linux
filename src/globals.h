@@ -13,7 +13,6 @@
  */
 extern thread_pool_util::ThreadPool task_pool;
 
-
 /**
  * @brief Handles process-wide communication.
  */
@@ -49,7 +48,6 @@ namespace mail {
   MAIL(cursor_shape);  ///< Complete local-cursor wire chunks awaiting reliable transmission.
   MAIL(cursor_position);  ///< Latest host-authoritative cursor position awaiting transmission.
   MAIL(clipboard_offer);  ///< Complete clipboard offer wire chunks awaiting reliable transmission.
-  MAIL(hdr);  ///< HDR.
 #undef MAIL
 
 }  // namespace mail

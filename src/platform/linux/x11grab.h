@@ -11,14 +11,14 @@
 
 // local includes
 #include "src/platform/common.h"
-#include "x11_rgb10.h"
 #include "src/utility.h"
+#include "x11_rgb10.h"
 
 // X11 Display
 extern "C" struct _XDisplay;
 
-namespace egl {
-  class cursor_t;
+namespace platf {
+  class cursor_image_t;
 }
 
 namespace platf::x11 {
@@ -52,18 +52,7 @@ namespace platf::x11 {
    * @param destination_width Destination width in pixels.
    * @param destination_height Destination height in pixels.
    */
-  void scale_xrgb10_to_gbr10(const std::uint8_t *source,
-                             std::size_t source_pitch,
-                             int source_width,
-                             int source_height,
-                             std::uint16_t *green,
-                             std::size_t green_pitch,
-                             std::uint16_t *blue,
-                             std::size_t blue_pitch,
-                             std::uint16_t *red,
-                             std::size_t red_pitch,
-                             int destination_width,
-                             int destination_height);
+  void scale_xrgb10_to_gbr10(const std::uint8_t *source, std::size_t source_pitch, int source_width, int source_height, std::uint16_t *green, std::size_t green_pitch, std::uint16_t *blue, std::size_t blue_pitch, std::uint16_t *red, std::size_t red_pitch, int destination_width, int destination_height);
 
   struct cursor_ctx_raw_t;
   /**
@@ -105,7 +94,7 @@ namespace platf::x11 {
      *
      * @param img Image or frame object to read from or populate.
      */
-    bool capture(egl::cursor_t &img);
+    bool capture(platf::cursor_image_t &img);
 
     /**
      * @brief Subscribe this connection to XFixes cursor-shape changes.

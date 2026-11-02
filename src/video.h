@@ -20,7 +20,6 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
 }
 
 struct AVPacket;
@@ -28,7 +27,6 @@ struct AVPacket;
 namespace video {
 
   enum class capture_source_e {
-    configured,
     nvfbc_8bit,
     x11_native10,
   };
@@ -67,12 +65,12 @@ namespace video {
     int slicesPerFrame;  ///< Number of slices per frame.
     int numRefFrames;  ///< Maximum number of reference frames.
     int encoderCscMode;  ///< Requested color range and SDR colorspace; HDR always uses BT.2020 and ST2084.
-    int videoFormat;  ///< Video codec format: 0 = H.264, 1 = HEVC, 2 = AV1.
+    int videoFormat;  ///< Video codec format: 0 = H.264, 1 = HEVC.
     int dynamicRange;  ///< Encoding color depth: 0 = 8-bit, 1 = 10-bit.
     int chromaSamplingType;  ///< Chroma sampling type: 0 = 4:2:0, 1 = 4:4:4, 2 = 4:2:2.
     int enableIntraRefresh;  ///< Intra refresh setting: 0 = disabled, 1 = enabled.
     bool span_desktop {};  ///< Capture and scale the complete virtual desktop rather than one output.
-    capture_source_e capture_source {capture_source_e::configured};  ///< Exact capture path negotiated for this session, or configured during probes.
+    capture_source_e capture_source {capture_source_e::nvfbc_8bit};  ///< Exact capture path negotiated for this session, or configured during probes.
     std::string encoder_backend;  ///< Exact PLANK encoder backend selected for this session.
   };
 
@@ -84,26 +82,6 @@ namespace video {
    */
   int select_h264_profile(const config_t &config);
 
-  /**
-   * @brief Decide whether an FFmpeg software H.264 session should use packed native RGB input.
-   *
-   * @param encoder_backend Sunshine encoder backend selected for the stream.
-   * @param configured_encoder FFmpeg encoder name configured for the software backend.
-   * @param config Encoding configuration requested by the client.
-   * @param colorspace Effective stream colorspace.
-   * @return True when `libx264rgb` and `AV_PIX_FMT_BGR0` should replace
-   * `libx264` and planar input. The qualified CUDA backend deliberately uses
-   * planar identity GBR for both 8-bit and 10-bit 4:4:4 profiles.
-   */
-  bool use_native_x264rgb(std::string_view encoder_backend, std::string_view configured_encoder, const config_t &config, const sunshine_colorspace_t &colorspace);
-
-  /**
-   * @brief Map an FFmpeg hardware device type to Sunshine's memory type.
-   *
-   * @param type FFmpeg hardware device type reported by the encoder backend.
-   * @return Sunshine memory type used by the capture and encode pipeline.
-   */
-  platf::mem_type_e map_base_dev_type(AVHWDeviceType type);
   /**
    * @brief Map an FFmpeg pixel format to Sunshine's pixel format enum.
    *
@@ -125,13 +103,6 @@ namespace video {
    */
   void free_frame(AVFrame *frame);
   /**
-   * @brief Release a backend buffer allocated for capture or conversion.
-   *
-   * @param ref FFmpeg buffer reference to unref and free.
-   */
-  void free_buffer(AVBufferRef *ref);
-
-  /**
    * @brief Owning pointer for an FFmpeg codec context.
    */
   using avcodec_ctx_t = util::safe_ptr<AVCodecContext, free_ctx>;
@@ -139,14 +110,6 @@ namespace video {
    * @brief Owning pointer for an FFmpeg frame.
    */
   using avcodec_frame_t = util::safe_ptr<AVFrame, free_frame>;
-  /**
-   * @brief Owning pointer for an FFmpeg buffer reference.
-   */
-  using avcodec_buffer_t = util::safe_ptr<AVBufferRef, free_buffer>;
-  /**
-   * @brief Owning pointer for an FFmpeg software-scaling context.
-   */
-  using sws_t = util::safe_ptr<SwsContext, sws_freeContext>;
   /**
    * @brief Shared event that transports captured images between capture and encode threads.
    */
@@ -171,49 +134,30 @@ namespace video {
    */
   struct encoder_platform_formats_avcodec: encoder_platform_formats_t {
     /**
-     * @brief Callback that prepares an FFmpeg hardware input buffer for the encode device.
-     */
-    using init_buffer_function_t = std::function<util::Either<avcodec_buffer_t, int>(platf::avcodec_encode_device_t *)>;
-
-    /**
      * @brief Construct AVCodec platform format mappings.
      *
-     * @param avcodec_base_dev_type Base AVCodec hardware device type.
-     * @param avcodec_derived_dev_type Derived AVCodec hardware device type.
-     * @param avcodec_dev_pix_fmt AVCodec device pixel format.
      * @param avcodec_pix_fmt_8bit AVCodec 8-bit pixel format.
      * @param avcodec_pix_fmt_10bit AVCodec 10-bit pixel format.
      * @param avcodec_pix_fmt_yuv444_8bit AVCodec 8-bit YUV444 pixel format.
      * @param avcodec_pix_fmt_yuv444_10bit AVCodec 10-bit YUV444 pixel format.
-     * @param init_avcodec_hardware_input_buffer_function Hardware input buffer initialization callback.
      * @param capture_dev_type Optional capture-memory override for a software encoder.
      */
     encoder_platform_formats_avcodec(
-      const AVHWDeviceType &avcodec_base_dev_type,
-      const AVHWDeviceType &avcodec_derived_dev_type,
-      const AVPixelFormat &avcodec_dev_pix_fmt,
       const AVPixelFormat &avcodec_pix_fmt_8bit,
       const AVPixelFormat &avcodec_pix_fmt_10bit,
       const AVPixelFormat &avcodec_pix_fmt_yuv444_8bit,
       const AVPixelFormat &avcodec_pix_fmt_yuv444_10bit,
-      const init_buffer_function_t &init_avcodec_hardware_input_buffer_function,
       const platf::mem_type_e capture_dev_type = platf::mem_type_e::unknown,
       const AVPixelFormat &avcodec_pix_fmt_yuv422_8bit = AV_PIX_FMT_NONE,
       const AVPixelFormat &avcodec_pix_fmt_yuv422_10bit = AV_PIX_FMT_NONE
     ):
-        avcodec_base_dev_type {avcodec_base_dev_type},
-        avcodec_derived_dev_type {avcodec_derived_dev_type},
-        avcodec_dev_pix_fmt {avcodec_dev_pix_fmt},
         avcodec_pix_fmt_8bit {avcodec_pix_fmt_8bit},
         avcodec_pix_fmt_10bit {avcodec_pix_fmt_10bit},
         avcodec_pix_fmt_yuv444_8bit {avcodec_pix_fmt_yuv444_8bit},
         avcodec_pix_fmt_yuv444_10bit {avcodec_pix_fmt_yuv444_10bit},
         avcodec_pix_fmt_yuv422_8bit {avcodec_pix_fmt_yuv422_8bit},
-        avcodec_pix_fmt_yuv422_10bit {avcodec_pix_fmt_yuv422_10bit},
-        init_avcodec_hardware_input_buffer {init_avcodec_hardware_input_buffer_function} {
-      dev_type = capture_dev_type == platf::mem_type_e::unknown ?
-                   map_base_dev_type(avcodec_base_dev_type) :
-                   capture_dev_type;
+        avcodec_pix_fmt_yuv422_10bit {avcodec_pix_fmt_yuv422_10bit} {
+      dev_type = capture_dev_type;
       pix_fmt_8bit = map_pix_fmt(avcodec_pix_fmt_8bit);
       pix_fmt_10bit = map_pix_fmt(avcodec_pix_fmt_10bit);
       pix_fmt_yuv444_8bit = map_pix_fmt(avcodec_pix_fmt_yuv444_8bit);
@@ -222,17 +166,12 @@ namespace video {
       pix_fmt_yuv422_10bit = map_pix_fmt(avcodec_pix_fmt_yuv422_10bit);
     }
 
-    AVHWDeviceType avcodec_base_dev_type;  ///< FFmpeg device type used to create the primary hardware context.
-    AVHWDeviceType avcodec_derived_dev_type;  ///< FFmpeg device type derived from the primary hardware context.
-    AVPixelFormat avcodec_dev_pix_fmt;  ///< FFmpeg hardware-device pixel format for frames handed to the encoder.
     AVPixelFormat avcodec_pix_fmt_8bit;  ///< FFmpeg 8-bit 4:2:0 software pixel format for this encoder.
     AVPixelFormat avcodec_pix_fmt_10bit;  ///< FFmpeg 10-bit 4:2:0 software pixel format for this encoder.
     AVPixelFormat avcodec_pix_fmt_yuv444_8bit;  ///< FFmpeg 8-bit 4:4:4 software pixel format for this encoder.
     AVPixelFormat avcodec_pix_fmt_yuv444_10bit;  ///< FFmpeg 10-bit 4:4:4 software pixel format for this encoder.
     AVPixelFormat avcodec_pix_fmt_yuv422_8bit;  ///< FFmpeg 8-bit 4:2:2 software pixel format for this encoder.
     AVPixelFormat avcodec_pix_fmt_yuv422_10bit;  ///< FFmpeg 10-bit 4:2:2 software pixel format for this encoder.
-
-    init_buffer_function_t init_avcodec_hardware_input_buffer;  ///< Backend hook that allocates or imports hardware frames for FFmpeg.
   };
 
   /**
@@ -277,11 +216,11 @@ namespace video {
     enum flag_e {
       PASSED,  ///< Indicates the encoder is supported.
       REF_FRAMES_RESTRICT,  ///< Set maximum reference frames.
-      DYNAMIC_RANGE,  ///< HDR support.
+      TEN_BIT,  ///< 10-bit support.
       YUV444,  ///< YUV 4:4:4 support.
-      DYNAMIC_RANGE_YUV444,  ///< YUV 4:4:4 HDR support.
+      TEN_BIT_YUV444,  ///< YUV 4:4:4 ten-bit support.
       YUV422,  ///< YUV 4:2:2 support.
-      DYNAMIC_RANGE_YUV422,  ///< 10-bit YUV 4:2:2 support.
+      TEN_BIT_YUV422,  ///< 10-bit YUV 4:2:2 support.
       VUI_PARAMETERS,  ///< AMD encoder with VAAPI doesn't add VUI parameters to SPS.
       MAX_FLAGS  ///< Maximum number of flags.
     };
@@ -301,11 +240,11 @@ namespace video {
       switch (flag) {
         _CONVERT(PASSED);
         _CONVERT(REF_FRAMES_RESTRICT);
-        _CONVERT(DYNAMIC_RANGE);
+        _CONVERT(TEN_BIT);
         _CONVERT(YUV444);
-        _CONVERT(DYNAMIC_RANGE_YUV444);
+        _CONVERT(TEN_BIT_YUV444);
         _CONVERT(YUV422);
-        _CONVERT(DYNAMIC_RANGE_YUV422);
+        _CONVERT(TEN_BIT_YUV422);
         _CONVERT(VUI_PARAMETERS);
         _CONVERT(MAX_FLAGS);
       }
@@ -314,44 +253,12 @@ namespace video {
       return {"unknown"};
     }
 
-    /**
-     * @brief Runtime encoder option exposed to configuration parsing.
-     */
-    struct option_t {
-      KITTY_DEFAULT_CONSTR_MOVE(option_t)
-      /**
-       * @brief Copy an encoder option descriptor.
-       */
-      option_t(const option_t &) = default;
-
-      std::string name;  ///< Encoder command-line option name.
-      std::variant<int, int *, std::optional<int> *, std::function<int()>, std::string, std::string *, std::function<const std::string(const config_t &)>> value;  ///< Literal, pointer, or callback that supplies the option value.
-
-      /**
-       * @brief Store a named encoder option and its value source.
-       *
-       * @param name Human-readable name to assign.
-       * @param value Literal value, pointer, or callback used to resolve the option.
-       */
-      option_t(std::string &&name, decltype(value) &&value):
-          name {std::move(name)},
-          value {std::move(value)} {
-      }
-    };
-
     const std::unique_ptr<const encoder_platform_formats_t> platform_formats;  ///< Platform-specific memory and pixel formats accepted by the encoder.
 
     /**
-     * @brief Codec capabilities for AV1, HEVC, or H.264.
+     * @brief Codec capabilities for HEVC or H.264.
      */
     struct codec_t {
-      std::vector<option_t> common_options;  ///< Options applied to every encode mode for this codec.
-      std::vector<option_t> sdr_options;  ///< Options applied to SDR 4:2:0 streams.
-      std::vector<option_t> hdr_options;  ///< Options applied to HDR 4:2:0 streams.
-      std::vector<option_t> sdr444_options;  ///< Options applied to SDR 4:4:4 streams.
-      std::vector<option_t> hdr444_options;  ///< Options applied to HDR 4:4:4 streams.
-      std::vector<option_t> fallback_options;  ///< Options used when the preferred mode cannot be selected.
-
       std::string name;  ///< Codec name passed to the encoder backend.
       std::bitset<MAX_FLAGS> capabilities;  ///< Capability flags supported by this codec on the encoder.
 
@@ -376,7 +283,6 @@ namespace video {
       }
     };
 
-    codec_t av1;  ///< AV1 codec capability and option set.
     codec_t hevc;  ///< HEVC codec capability and option set.
     codec_t h264;  ///< H.264 codec capability and option set.
 
@@ -384,7 +290,7 @@ namespace video {
      * @brief Select the codec descriptor requested by a stream configuration.
      *
      * @param config Configuration values to apply.
-     * @return Codec descriptor for H.264, HEVC, or AV1.
+     * @return Codec descriptor for H.264 or HEVC.
      */
     const codec_t &codec_from_config(const config_t &config) const {
       switch (config.videoFormat) {
@@ -395,12 +301,10 @@ namespace video {
           return h264;
         case 1:
           return hevc;
-        case 2:
-          return av1;
       }
     }
 
-    uint32_t flags;  ///< Encoder flags advertised to clients through GameStream capability responses.
+    uint32_t flags;  ///< Encoder execution and format capability flags.
   };
 
   /**
@@ -434,7 +338,6 @@ namespace video {
      * @param last_frame Last frame.
      */
     virtual void invalidate_ref_frames(int64_t first_frame, int64_t last_frame) = 0;
-
   };
 
   // Product encoder descriptors exposed for hardware qualification.
@@ -442,7 +345,6 @@ namespace video {
   extern encoder_t software_cuda;
   extern encoder_t nvenc_direct;
 #endif
-
 
   /**
    * @brief Encoded packet wrapper used by the streaming pipeline.
@@ -619,39 +521,8 @@ namespace video {
    */
   using packet_t = std::unique_ptr<packet_raw_t>;
 
-  /**
-   * @brief Raw HDR metadata fields parsed from the display backend.
-   */
-  struct hdr_info_raw_t {
-    /**
-     * @brief Initialize HDR metadata with only the enabled state.
-     *
-     * @param enabled Whether the feature should be enabled.
-     */
-    explicit hdr_info_raw_t(bool enabled):
-        enabled {enabled},
-        metadata {} {};
-    /**
-     * @brief Initialize HDR metadata with display metadata from the backend.
-     *
-     * @param enabled Whether the feature should be enabled.
-     * @param metadata Output structure populated with HDR metadata.
-     */
-    explicit hdr_info_raw_t(bool enabled, const SS_HDR_METADATA &metadata):
-        enabled {enabled},
-        metadata {metadata} {};
-
-    bool enabled;  ///< Whether HDR mode should be enabled.
-    SS_HDR_METADATA metadata;  ///< Display HDR metadata forwarded to the encoder and client.
-  };
-
-  /**
-   * @brief Owning pointer to optional HDR metadata for a captured display.
-   */
-  using hdr_info_t = std::unique_ptr<hdr_info_raw_t>;
-
   extern bool last_encoder_probe_supported_ref_frames_invalidation;
-  extern std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec;  // 0 - H.264, 1 - HEVC, 2 - AV1
+  extern std::array<bool, 2> last_encoder_probe_supported_yuv444_for_codec;  // 0 - H.264, 1 - HEVC
   extern bool last_encoder_probe_supported_h264_10bit_444;  ///< Whether the selected encoder accepts H.264 10-bit 4:4:4 input.
   extern bool last_encoder_probe_supported_h264_8bit_422;  ///< Whether the selected encoder accepts H.264 8-bit 4:2:2 input.
   extern bool last_encoder_probe_supported_h264_10bit_422;  ///< Whether the selected encoder accepts H.264 10-bit 4:2:2 input.
@@ -693,8 +564,7 @@ namespace video {
    * @param test_av1 Probe AV1 support when an exact PLANK AV1 profile exists.
    * @return True when encoder validation matches `expect_failure`.
    */
-  bool validate_encoder(encoder_t &encoder, bool expect_failure,
-                        bool test_hevc = false, bool test_av1 = false);
+  bool validate_encoder(encoder_t &encoder, bool expect_failure, bool test_hevc = false, bool test_av1 = false);
 
   /**
    * @brief Probe encoders and select the preferred encoder.

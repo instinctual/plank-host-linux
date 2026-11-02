@@ -17,49 +17,37 @@ extern "C" {
 namespace video {
 
   /**
-   * @brief Check whether a Sunshine colorspace represents HDR video.
-   */
-  bool colorspace_is_hdr(const sunshine_colorspace_t &colorspace) {
-    return colorspace.colorspace == colorspace_e::bt2020;
-  }
-
-  /**
    * @brief Derive Sunshine colorspace metadata from client stream configuration.
    */
-  sunshine_colorspace_t colorspace_from_client_config(const config_t &config, bool hdr_display) {
+  sunshine_colorspace_t colorspace_from_client_config(const config_t &config) {
     sunshine_colorspace_t colorspace;
 
     /* See video::config_t declaration for details */
 
-    if (config.dynamicRange > 0 && hdr_display && config.videoFormat != 0) {
-      // Rec. 2020 with ST 2084 perceptual quantizer
-      colorspace.colorspace = colorspace_e::bt2020;
-    } else {
-      switch (config.encoderCscMode >> 1) {
-        case 0:
-          // Rec. 601
-          colorspace.colorspace = colorspace_e::rec601;
-          break;
+    switch (config.encoderCscMode >> 1) {
+      case 0:
+        // Rec. 601
+        colorspace.colorspace = colorspace_e::rec601;
+        break;
 
-        case 1:
-          // Rec. 709
-          colorspace.colorspace = colorspace_e::rec709;
-          break;
+      case 1:
+        // Rec. 709
+        colorspace.colorspace = colorspace_e::rec709;
+        break;
 
-        case 2:
-          // Rec. 2020
-          colorspace.colorspace = colorspace_e::bt2020sdr;
-          break;
+      case 2:
+        // Rec. 2020
+        colorspace.colorspace = colorspace_e::bt2020sdr;
+        break;
 
-        case COLORSPACE_IDENTITY_GBR:
-          colorspace.colorspace = colorspace_e::identity_gbr;
-          break;
+      case COLORSPACE_IDENTITY_GBR:
+        colorspace.colorspace = colorspace_e::identity_gbr;
+        break;
 
-        default:
-          BOOST_LOG(error) << "Unknown video colorspace in csc, falling back to Rec. 709";
-          colorspace.colorspace = colorspace_e::rec709;
-          break;
-      }
+      default:
+        BOOST_LOG(error) << "Unknown video colorspace in csc, falling back to Rec. 709";
+        colorspace.colorspace = colorspace_e::rec709;
+        break;
     }
 
     colorspace.full_range = (config.encoderCscMode & 0x1);
@@ -125,15 +113,6 @@ namespace video {
         avcodec_colorspace.software_format = SWS_CS_BT2020;
         break;
 
-      case colorspace_e::bt2020:
-        // Rec. 2020 with ST 2084 perceptual quantizer
-        avcodec_colorspace.primaries = AVCOL_PRI_BT2020;
-        assert(sunshine_colorspace.bit_depth == 10);
-        avcodec_colorspace.transfer_function = AVCOL_TRC_SMPTE2084;
-        avcodec_colorspace.matrix = AVCOL_SPC_BT2020_NCL;
-        avcodec_colorspace.software_format = SWS_CS_BT2020;
-        break;
-
       case colorspace_e::identity_gbr:
         avcodec_colorspace.primaries = AVCOL_PRI_BT709;
         avcodec_colorspace.transfer_function = AVCOL_TRC_IEC61966_2_1;
@@ -166,7 +145,6 @@ namespace video {
           Kr = 0.2126;
           Kb = 0.0722;
           break;
-        case colorspace_e::bt2020:
         case colorspace_e::bt2020sdr:
           Kr = 0.2627;
           Kb = 0.0593;
@@ -265,10 +243,10 @@ namespace video {
       generate_color_vectors({colorspace_e::rec709, true, 8}, false),
       generate_color_vectors({colorspace_e::rec709, false, 10}, false),
       generate_color_vectors({colorspace_e::rec709, true, 10}, false),
-      generate_color_vectors({colorspace_e::bt2020, false, 8}, false),
-      generate_color_vectors({colorspace_e::bt2020, true, 8}, false),
-      generate_color_vectors({colorspace_e::bt2020, false, 10}, false),
-      generate_color_vectors({colorspace_e::bt2020, true, 10}, false),
+      generate_color_vectors({colorspace_e::bt2020sdr, false, 8}, false),
+      generate_color_vectors({colorspace_e::bt2020sdr, true, 8}, false),
+      generate_color_vectors({colorspace_e::bt2020sdr, false, 10}, false),
+      generate_color_vectors({colorspace_e::bt2020sdr, true, 10}, false),
       generate_color_vectors({colorspace_e::identity_gbr, false, 8}, false),
       generate_color_vectors({colorspace_e::identity_gbr, true, 8}, false),
       generate_color_vectors({colorspace_e::identity_gbr, false, 10}, false),
@@ -282,10 +260,10 @@ namespace video {
       generate_color_vectors({colorspace_e::rec709, true, 8}, true),
       generate_color_vectors({colorspace_e::rec709, false, 10}, true),
       generate_color_vectors({colorspace_e::rec709, true, 10}, true),
-      generate_color_vectors({colorspace_e::bt2020, false, 8}, true),
-      generate_color_vectors({colorspace_e::bt2020, true, 8}, true),
-      generate_color_vectors({colorspace_e::bt2020, false, 10}, true),
-      generate_color_vectors({colorspace_e::bt2020, true, 10}, true),
+      generate_color_vectors({colorspace_e::bt2020sdr, false, 8}, true),
+      generate_color_vectors({colorspace_e::bt2020sdr, true, 8}, true),
+      generate_color_vectors({colorspace_e::bt2020sdr, false, 10}, true),
+      generate_color_vectors({colorspace_e::bt2020sdr, true, 10}, true),
       generate_color_vectors({colorspace_e::identity_gbr, false, 8}, true),
       generate_color_vectors({colorspace_e::identity_gbr, true, 8}, true),
       generate_color_vectors({colorspace_e::identity_gbr, false, 10}, true),
@@ -302,7 +280,6 @@ namespace video {
       default:
         result = &colors[4];
         break;
-      case colorspace_e::bt2020:
       case colorspace_e::bt2020sdr:
         result = &colors[8];
         break;

@@ -33,12 +33,13 @@
 #include <unistd.h>
 
 #ifdef PLANK_TRANSPORT
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/rand.h>
-#include "plank_transport.h"
-#include "plank_transport_control.h"
+  #include "plank_transport.h"
+  #include "plank_transport_control.h"
+
+  #include <openssl/crypto.h>
+  #include <openssl/evp.h>
+  #include <openssl/pem.h>
+  #include <openssl/rand.h>
 #endif
 
 // local includes
@@ -140,31 +141,24 @@ namespace nvhttp {
     // util::hex_vec() defaults to the little-endian representation used by
     // legacy GameStream fields. Certificate pins use the conventional byte
     // order emitted by TLS implementations and openssl x509 -fingerprint.
-    return util::hex_vec(std::vector<std::uint8_t>(
-      digest.begin(), digest.begin() + digest_size
-    ), true);
+    return util::hex_vec(std::vector<std::uint8_t>(digest.begin(), digest.begin() + digest_size), true);
   }
 
-  bool start_plank_transport_data_plane(session_stream::launch_session_t &session,
-                                  pt::ptree &tree) {
+  bool start_plank_transport_data_plane(session_stream::launch_session_t &session, pt::ptree &tree) {
     const auto fingerprint = certificate_sha256(config::nvhttp.cert);
     if (!fingerprint) {
       tree.put("root.<xmlattr>.status_code", 503);
-      tree.put("root.<xmlattr>.status_message",
-               "Unable to fingerprint the PLANK data-plane certificate");
+      tree.put("root.<xmlattr>.status_message", "Unable to fingerprint the PLANK data-plane certificate");
       return false;
     }
 
     std::array<unsigned char, 32> token_bytes {};
     if (RAND_bytes(token_bytes.data(), token_bytes.size()) != 1) {
       tree.put("root.<xmlattr>.status_code", 503);
-      tree.put("root.<xmlattr>.status_message",
-               "Unable to create the PLANK data-plane token");
+      tree.put("root.<xmlattr>.status_message", "Unable to create the PLANK data-plane token");
       return false;
     }
-    std::string token = util::hex_vec(std::vector<std::uint8_t>(
-      token_bytes.begin(), token_bytes.end()
-    ));
+    std::string token = util::hex_vec(std::vector<std::uint8_t>(token_bytes.begin(), token_bytes.end()));
     OPENSSL_cleanse(token_bytes.data(), token_bytes.size());
 
     const auto port = net::map_port(0);
@@ -177,7 +171,8 @@ namespace nvhttp {
     const auto configured_idle_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(
         config::stream.ping_timeout
-      ).count();
+      )
+        .count();
     const auto idle_ms = std::clamp<std::int64_t>(configured_idle_ms, 200, 120000);
     const auto keep_alive_ms = std::clamp<std::int64_t>(idle_ms / 2, 100, 5000);
     endpoint_config.idle_timeout_ms = static_cast<std::uint32_t>(idle_ms);
@@ -199,7 +194,8 @@ namespace nvhttp {
     }
     if (result != PLANK_TRANSPORT_OK) {
       const std::string error_message = endpoint == nullptr ?
-        "endpoint creation failed" : plank_transport_last_error(endpoint);
+                                          "endpoint creation failed" :
+                                          plank_transport_last_error(endpoint);
       if (endpoint != nullptr) {
         plank_transport_native_endpoint_destroy(endpoint);
       }
@@ -207,8 +203,7 @@ namespace nvhttp {
       BOOST_LOG(error) << "Unable to start PLANK transport listener: "sv
                        << error_message;
       tree.put("root.<xmlattr>.status_code", 503);
-      tree.put("root.<xmlattr>.status_message",
-               "Unable to start the experimental PLANK data plane");
+      tree.put("root.<xmlattr>.status_message", "Unable to start the experimental PLANK data plane");
       return false;
     }
 
@@ -249,6 +244,7 @@ namespace nvhttp {
    * @brief Shared HTTPS request object received by GameStream handlers.
    */
   using req_https_t = std::shared_ptr<typename SimpleWeb::ServerBase<SunshineHTTPS>::Request>;
+
   /**
    * @brief Return the normalized peer address used to bind an authentication session.
    *
@@ -266,8 +262,7 @@ namespace nvhttp {
    * @param status HTTP status.
    * @param body JSON response body.
    */
-  void write_auth_json(const resp_https_t &response, SimpleWeb::StatusCode status,
-                       const nlohmann::json &body) {
+  void write_auth_json(const resp_https_t &response, SimpleWeb::StatusCode status, const nlohmann::json &body) {
     SimpleWeb::CaseInsensitiveMultimap headers {
       {"Content-Type", "application/json"},
       {"Cache-Control", "no-store"},
@@ -341,14 +336,12 @@ namespace nvhttp {
    */
   void auth_start(const resp_https_t &response, const req_https_t &request, const std::string &peer, std::stop_token cancellation) {
     if (!web_auth) {
-      write_auth_json(response, SimpleWeb::StatusCode::server_error_service_unavailable,
-                      {{"state", "unavailable"}});
+      write_auth_json(response, SimpleWeb::StatusCode::server_error_service_unavailable, {{"state", "unavailable"}});
       return;
     }
     const auto body = read_auth_json(request);
     if (!body.is_object() || !body.contains("username") || !body["username"].is_string()) {
-      write_auth_json(response, SimpleWeb::StatusCode::client_error_bad_request,
-                      {{"state", "invalid-request"}});
+      write_auth_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"state", "invalid-request"}});
       return;
     }
     const auto username = body["username"].get<std::string>();
@@ -369,8 +362,7 @@ namespace nvhttp {
     if (!web_auth || !body.is_object() || !body.contains("conversation_id") ||
         !body["conversation_id"].is_string() || !body.contains("responses") ||
         !body["responses"].is_array() || body["responses"].size() > 64) {
-      write_auth_json(response, SimpleWeb::StatusCode::client_error_bad_request,
-                      {{"state", "invalid-request"}});
+      write_auth_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"state", "invalid-request"}});
       return;
     }
     std::vector<std::string> responses;
@@ -379,8 +371,7 @@ namespace nvhttp {
         for (auto &value : responses) {
           explicit_bzero(value.data(), value.size());
         }
-        write_auth_json(response, SimpleWeb::StatusCode::client_error_bad_request,
-                        {{"state", "invalid-request"}});
+        write_auth_json(response, SimpleWeb::StatusCode::client_error_bad_request, {{"state", "invalid-request"}});
         return;
       }
       responses.push_back(item.get<std::string>());
@@ -497,22 +488,26 @@ namespace nvhttp {
     // administrator setting is now a physical/virtual policy. Virtual hosts
     // always initialize one 1920x1080 output before bookmark negotiation.
     result.startup_kind = config::sunshine.startup_layout == "virtual" ?
-      "single" : "physical";
+                            "single" :
+                            "physical";
     if (const auto runtime = plank::session::read_runtime_display_state(
           runtime_display_state
         )) {
       result.kind = runtime->layout;
       result.virtual_layout = true;
       result.virtual_modes = {runtime->mode_1};
-      if (!runtime->mode_2.empty()) result.virtual_modes.push_back(runtime->mode_2);
+      if (!runtime->mode_2.empty()) {
+        result.virtual_modes.push_back(runtime->mode_2);
+      }
       result.temporary_physical_lease = true;
       result.lease_uid = runtime->lease_uid;
       return result;
     }
     result.virtual_layout = result.startup_kind != "physical";
     result.kind = !result.virtual_layout ? "physical" :
-      outputs.size() == 1 ? "single" :
-      outputs.size() == 2 ? "dual-horizontal" : "unhealthy";
+                  outputs.size() == 1    ? "single" :
+                  outputs.size() == 2    ? "dual-horizontal" :
+                                           "unhealthy";
     if (result.virtual_layout) {
       auto left_to_right = outputs;
       std::sort(left_to_right.begin(), left_to_right.end(), [](const auto &left, const auto &right) {
@@ -564,20 +559,20 @@ namespace nvhttp {
       {"schema_version", plank_topology_version},
       {"feature_flags", plank_topology_features},
       {"layout", {
-        {"kind", live_layout.kind},
-        {"virtual", live_layout.virtual_layout},
-        {"virtual_modes", virtual_modes},
-        {"output_count", outputs.size()},
-        {"startup_kind", live_layout.startup_kind},
-        {"allowed_kinds", allowed_layouts},
-      }},
+                   {"kind", live_layout.kind},
+                   {"virtual", live_layout.virtual_layout},
+                   {"virtual_modes", virtual_modes},
+                   {"output_count", outputs.size()},
+                   {"startup_kind", live_layout.startup_kind},
+                   {"allowed_kinds", allowed_layouts},
+                 }},
       {"outputs", nlohmann::json::array()},
     };
     for (std::size_t index = 0; index < outputs.size(); ++index) {
       const auto &output = outputs[index];
-      const std::string configured_mode = !live_layout.virtual_layout ? std::string {} :
-        index < live_layout.virtual_modes.size() ? live_layout.virtual_modes[index] :
-                                                   std::string {};
+      const std::string configured_mode = !live_layout.virtual_layout              ? std::string {} :
+                                          index < live_layout.virtual_modes.size() ? live_layout.virtual_modes[index] :
+                                                                                     std::string {};
       body["outputs"].push_back({
         {"id", output.id},
         {"name", output.name},
@@ -591,24 +586,24 @@ namespace nvhttp {
         {"virtual", live_layout.virtual_layout},
         {"configured_mode", configured_mode},
         {"source_rect", {
-          {"x", output.x - min_x},
-          {"y", output.y - min_y},
-          {"width", output.width},
-          {"height", output.height},
-        }},
+                          {"x", output.x - min_x},
+                          {"y", output.y - min_y},
+                          {"width", output.width},
+                          {"height", output.height},
+                        }},
       });
     }
     body["desktop"] = {
-      {"x", min_x}, {"y", min_y}, {"width", max_x - min_x}, {"height", max_y - min_y},
+      {"x", min_x},
+      {"y", min_y},
+      {"width", max_x - min_x},
+      {"height", max_y - min_y},
     };
     body["generation"] = video::output_topology_generation(outputs);
     return body;
   }
 
-  bool bind_host_layout(session_stream::launch_session_t &session,
-                        const std::vector<platf::display_info_t> &outputs,
-                        uid_t authenticated_uid,
-                        pt::ptree &tree) {
+  bool bind_host_layout(session_stream::launch_session_t &session, const std::vector<platf::display_info_t> &outputs, uid_t authenticated_uid, pt::ptree &tree) {
     if (session.plank_protocol_version != plank_topology_version ||
         (session.plank_feature_flags & plank_feature_fixed_transport_mtu) == 0 ||
         (session.plank_feature_flags & plank_feature_host_layout_binding) == 0 ||
@@ -635,14 +630,18 @@ namespace nvhttp {
 
     const auto live_layout = live_display_layout(outputs);
     if (!plank::topology::valid_virtual_primary_binding(
-          session.host_layout, live_layout.startup_kind, session.primary_output,
-          session.plank_feature_flags)) {
+          session.host_layout,
+          live_layout.startup_kind,
+          session.primary_output,
+          session.plank_feature_flags
+        )) {
       tree.put("root.<xmlattr>.status_code", 400);
       tree.put("root.<xmlattr>.status_message", "Invalid or unnegotiated virtual primary binding");
       return false;
     }
     if (!plank::topology::layout_allowed_by_startup_layout(
-          session.host_layout, live_layout.startup_kind
+          session.host_layout,
+          live_layout.startup_kind
         )) {
       tree.put("root.<xmlattr>.status_code", 409);
       tree.put(
@@ -653,10 +652,12 @@ namespace nvhttp {
     }
     const auto &actual_layout = live_layout.kind;
     const auto actual_mode_1 = live_layout.virtual_layout &&
-      !live_layout.virtual_modes.empty() ? live_layout.virtual_modes[0] : std::string {};
+                                   !live_layout.virtual_modes.empty() ?
+                                 live_layout.virtual_modes[0] :
+                                 std::string {};
     const auto actual_mode_2 = actual_layout == "dual-horizontal" ?
-      live_layout.virtual_modes.size() > 1 ? live_layout.virtual_modes[1] : std::string {} :
-      std::string {};
+                                 live_layout.virtual_modes.size() > 1 ? live_layout.virtual_modes[1] : std::string {} :
+                                 std::string {};
     const auto validation = plank::topology::validate_layout_binding(
       session.host_layout,
       session.virtual_mode_1,
@@ -672,34 +673,32 @@ namespace nvhttp {
       return false;
     }
     const bool primary_mismatch = session.primary_output >= 0 &&
-      (static_cast<std::size_t>(session.primary_output) >= ordered_outputs.size() ||
-       !ordered_outputs[session.primary_output].get().primary);
+                                  (static_cast<std::size_t>(session.primary_output) >= ordered_outputs.size() ||
+                                   !ordered_outputs[session.primary_output].get().primary);
     // Flame chooses the first virtual connector even when GNOME marks a
     // different output primary. Bind DP-0 to the requested side as well.
     const std::string_view selected_connector = session.primary_output >= 0 &&
-      static_cast<std::size_t>(session.primary_output) < ordered_outputs.size() ?
-      std::string_view {ordered_outputs[session.primary_output].get().id} : std::string_view {};
+                                                    static_cast<std::size_t>(session.primary_output) < ordered_outputs.size() ?
+                                                  std::string_view {ordered_outputs[session.primary_output].get().id} :
+                                                  std::string_view {};
     const bool connector_mismatch = !plank::topology::virtual_primary_connector_matches(
-      live_layout.startup_kind, session.primary_output, ordered_outputs.size(), selected_connector
+      live_layout.startup_kind,
+      session.primary_output,
+      ordered_outputs.size(),
+      selected_connector
     );
     if (validation == plank::topology::layout_error::mismatch ||
         (validation == plank::topology::layout_error::none &&
          (primary_mismatch || connector_mismatch))) {
-      const auto transition = plank::session::request_display_transition({
-        plank::session::display_request_t::action_t::acquire,
-        session.host_layout, session.virtual_mode_1, session.virtual_mode_2,
-        authenticated_uid, session.primary_output
-      });
+      const auto transition = plank::session::request_display_transition({plank::session::display_request_t::action_t::acquire, session.host_layout, session.virtual_mode_1, session.virtual_mode_2, authenticated_uid, session.primary_output});
       if (transition == plank::session::display_request_status::submitted) {
         tree.put("root.<xmlattr>.status_code", 425);
-        tree.put("root.<xmlattr>.status_message",
-                 "PLANK host display transition started");
+        tree.put("root.<xmlattr>.status_message", "PLANK host display transition started");
         return false;
       }
       if (transition == plank::session::display_request_status::wrong_user) {
         tree.put("root.<xmlattr>.status_code", 423);
-        tree.put("root.<xmlattr>.status_message",
-                 "Only the active desktop user may change its display layout");
+        tree.put("root.<xmlattr>.status_message", "Only the active desktop user may change its display layout");
         return false;
       }
       tree.put("root.<xmlattr>.status_code", 503);
@@ -735,8 +734,7 @@ namespace nvhttp {
     if (live_layout.temporary_physical_lease) {
       if (live_layout.lease_uid != authenticated_uid) {
         tree.put("root.<xmlattr>.status_code", 423);
-        tree.put("root.<xmlattr>.status_message",
-                 "The temporary workstation display layout belongs to another account");
+        tree.put("root.<xmlattr>.status_message", "The temporary workstation display layout belongs to another account");
         return false;
       }
       session.plank_display_lease = true;
@@ -749,9 +747,7 @@ namespace nvhttp {
     write_auth_json(response, SimpleWeb::StatusCode::success_ok, output_topology_json());
   }
 
-  bool bind_topology_generation(session_stream::launch_session_t &session,
-                                const std::vector<platf::display_info_t> &outputs,
-                                pt::ptree &tree) {
+  bool bind_topology_generation(session_stream::launch_session_t &session, const std::vector<platf::display_info_t> &outputs, pt::ptree &tree) {
     // Bind the requested output layout atomically at launch. Do not poll the
     // display server from the capture callback: NVIDIA/X11 enumeration can
     // block physical presentation as well as the capture pipeline.
@@ -774,9 +770,7 @@ namespace nvhttp {
     return true;
   }
 
-  bool resolve_selected_output(session_stream::launch_session_t &session,
-                               uid_t authenticated_uid,
-                               pt::ptree &tree) {
+  bool resolve_selected_output(session_stream::launch_session_t &session, uid_t authenticated_uid, pt::ptree &tree) {
     const auto outputs = video::output_topology();
     if (!bind_host_layout(session, outputs, authenticated_uid, tree)) {
       return false;
@@ -835,81 +829,72 @@ namespace nvhttp {
     return true;
   }
 
-  bool validate_capture_source(session_stream::launch_session_t &session,
-                               pt::ptree &tree) {
+  bool validate_capture_source(session_stream::launch_session_t &session, pt::ptree &tree) {
     if (session.plank_protocol_version != plank_topology_version ||
         (session.plank_feature_flags &
          plank_feature_capture_source_selection) == 0) {
       tree.put("root.<xmlattr>.status_code", 400);
-      tree.put("root.<xmlattr>.status_message",
-               "PLANK capture-source negotiation is required");
+      tree.put("root.<xmlattr>.status_message", "PLANK capture-source negotiation is required");
       return false;
     }
     if (session.capture_source != "nvfbc" &&
         session.capture_source != "x11-native10") {
       tree.put("root.<xmlattr>.status_code", 400);
-      tree.put("root.<xmlattr>.status_message",
-               "Unsupported PLANK capture source");
+      tree.put("root.<xmlattr>.status_message", "Unsupported PLANK capture source");
       return false;
     }
     if (!video::capture_source_available(session.capture_source)) {
       tree.put("root.<xmlattr>.status_code", 503);
-      tree.put("root.<xmlattr>.status_message",
-               "Requested PLANK capture source is unavailable");
+      tree.put("root.<xmlattr>.status_message", "Requested PLANK capture source is unavailable");
       return false;
     }
     return true;
   }
 
-  bool validate_encoder_backend(session_stream::launch_session_t &session,
-                                pt::ptree &tree) {
+  bool validate_encoder_backend(session_stream::launch_session_t &session, pt::ptree &tree) {
     if (session.plank_protocol_version != plank_topology_version ||
         (session.plank_feature_flags &
          plank_feature_encoder_backend_selection) == 0) {
       tree.put("root.<xmlattr>.status_code", 400);
-      tree.put("root.<xmlattr>.status_message",
-               "PLANK encoder-backend negotiation is required");
+      tree.put("root.<xmlattr>.status_message", "PLANK encoder-backend negotiation is required");
       return false;
     }
     const bool nvenc_hevc10_mode = session.encoding_mode == "hevc-10-444-nvenc";
     if (!plank::topology::valid_encoding_tuple(
           session.capture_source,
           session.encoder_backend,
-          session.encoding_mode)) {
+          session.encoding_mode
+        )) {
       tree.put("root.<xmlattr>.status_code", 400);
-      tree.put("root.<xmlattr>.status_message",
-               "Unsupported PLANK capture and encoding mode combination");
+      tree.put("root.<xmlattr>.status_message", "Unsupported PLANK capture and encoding mode combination");
       return false;
     }
     if (session.capture_source == "nvfbc" && nvenc_hevc10_mode &&
         (session.plank_feature_flags &
          plank_feature_nvfbc_hevc10_nvenc) == 0) {
       tree.put("root.<xmlattr>.status_code", 400);
-      tree.put("root.<xmlattr>.status_message",
-               "NvFBC HEVC 10-bit NVENC negotiation is required");
+      tree.put("root.<xmlattr>.status_message", "NvFBC HEVC 10-bit NVENC negotiation is required");
       return false;
     }
     const bool exact_mode_available =
       video::encoding_mode_available(session.encoding_mode);
     if (!exact_mode_available) {
       tree.put("root.<xmlattr>.status_code", 503);
-      tree.put("root.<xmlattr>.status_message",
-               "Requested PLANK encoding mode is unavailable");
+      tree.put("root.<xmlattr>.status_message", "Requested PLANK encoding mode is unavailable");
       return false;
     }
     return true;
   }
 
-  bool validate_transport_mtu(session_stream::launch_session_t &session,
-                              pt::ptree &tree) {
+  bool validate_transport_mtu(session_stream::launch_session_t &session, pt::ptree &tree) {
     if (session.plank_protocol_version != plank_topology_version ||
         (session.plank_feature_flags &
          plank_feature_fixed_transport_mtu) == 0 ||
         !plank::topology::valid_quic_udp_payload_mtu(
-          session.quic_udp_payload_mtu)) {
+          session.quic_udp_payload_mtu
+        )) {
       tree.put("root.<xmlattr>.status_code", 400);
-      tree.put("root.<xmlattr>.status_message",
-               "A valid fixed PLANK QUIC UDP payload is required");
+      tree.put("root.<xmlattr>.status_message", "A valid fixed PLANK QUIC UDP payload is required");
       return false;
     }
     return true;
@@ -1037,7 +1022,6 @@ namespace nvhttp {
     launch_session->surround_info = (int) util::from_view(get_arg(args, "surroundAudioInfo", "196610"));
     launch_session->surround_params = (get_arg(args, "surroundParams", ""));
     launch_session->continuous_audio = util::from_view(get_arg(args, "continuousAudio", "0"));
-    launch_session->enable_hdr = util::from_view(get_arg(args, "hdrMode", "0"));
     launch_session->output_id = get_arg(args, "plankOutputId", "");
     launch_session->display_mode = get_arg(args, "plankDisplayMode", "");
     launch_session->topology_generation = get_arg(args, "plankTopologyGeneration", "");
@@ -1046,7 +1030,9 @@ namespace nvhttp {
     launch_session->virtual_mode_2 = get_arg(args, "plankVirtualMode2", "");
     const auto primary_output = get_arg(args, "plankPrimaryOutput", "");
     launch_session->primary_output = primary_output.empty() ? -1 :
-      primary_output == "0" ? 0 : primary_output == "1" ? 1 : -2;
+                                     primary_output == "0"  ? 0 :
+                                     primary_output == "1"  ? 1 :
+                                                              -2;
     launch_session->capture_source = get_arg(args, "plankCaptureSource", "");
     launch_session->encoder_backend = get_arg(args, "plankEncoderBackend", "");
     launch_session->encoding_mode = get_arg(args, "plankEncodingMode", "");
@@ -1180,7 +1166,9 @@ namespace nvhttp {
   std::string get_plank_encoding_modes() {
     std::string result;
     for (const auto &profile : plank_encoding_profiles) {
-      if (profile.encoder == PLANK_ENCODER_APPLE) continue;
+      if (profile.encoder == PLANK_ENCODER_APPLE) {
+        continue;
+      }
       const std::string_view mode = profile.mode;
       if (!video::encoding_mode_available(mode)) {
         continue;
@@ -1229,10 +1217,7 @@ namespace nvhttp {
     tree.put("root.PlankCaptureSources", "nvfbc,x11-native10");
     tree.put("root.PlankEncoderBackends", "software-cuda,nvenc-direct");
     tree.put("root.PlankEncodingModes", get_plank_encoding_modes());
-    tree.put("root.MaxLumaPixelsHEVC",
-             video::nvenc_direct_supports_hevc_444_8bit() ||
-                 video::nvenc_direct_supports_hevc_444_10bit() ?
-               "1869449984" : "0");
+    tree.put("root.MaxLumaPixelsHEVC", video::nvenc_direct_supports_hevc_444_8bit() || video::nvenc_direct_supports_hevc_444_10bit() ? "1869449984" : "0");
 
     // Moonlight clients track LAN IPv6 addresses separately from LocalIP which is expected to
     // always be an IPv4 address. If we return that same IPv6 address here, it will clobber the
@@ -1264,7 +1249,9 @@ namespace nvhttp {
     const auto desktop = plank::session::confirmed_desktop_occupancy(config::nvhttp.publish_session_user);
     const bool occupied = desktop.desktop_owned || session_stream::has_stream_session();
     tree.put("root.PlankOccupied", occupied ? 1 : 0);
-    if (desktop.account_name) tree.put("root.PlankSessionUser", *desktop.account_name);
+    if (desktop.account_name) {
+      tree.put("root.PlankSessionUser", *desktop.account_name);
+    }
 
     std::ostringstream data;
 
@@ -1297,7 +1284,6 @@ namespace nvhttp {
     apps.put("<xmlattr>.status_code", 200);
 
     pt::ptree app;
-    app.put("IsHdrSupported"s, 0);
     app.put("AppTitle"s, proc::desktop_app_name);
     app.put("ID", proc::desktop_app_id);
     apps.push_back(std::make_pair("App", std::move(app)));
@@ -1424,10 +1410,10 @@ namespace nvhttp {
 
     if (session_stream::session_count() == 0) {
       if (!video::select_encoder_backend_for_session(
-              launch_session->encoder_backend)) {
+            launch_session->encoder_backend
+          )) {
         tree.put("root.<xmlattr>.status_code", 503);
-        tree.put("root.<xmlattr>.status_message",
-                 "Requested PLANK encoder backend is unavailable");
+        tree.put("root.<xmlattr>.status_message", "Requested PLANK encoder backend is unavailable");
         tree.put("root.gamesession", 0);
         return;
       }
@@ -1577,10 +1563,10 @@ namespace nvhttp {
 
     if (no_active_sessions) {
       if (!video::select_encoder_backend_for_session(
-              launch_session->encoder_backend)) {
+            launch_session->encoder_backend
+          )) {
         tree.put("root.<xmlattr>.status_code", 503);
-        tree.put("root.<xmlattr>.status_message",
-                 "Requested PLANK encoder backend is unavailable");
+        tree.put("root.<xmlattr>.status_message", "Requested PLANK encoder backend is unavailable");
         tree.put("root.resume", 0);
         return;
       }

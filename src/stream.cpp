@@ -17,25 +17,26 @@ extern "C" {
 }
 
 // local includes
-#include "config.h"
 #include "clipboard_protocol.h"
+#include "config.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
+#include "plank_bitrate.h"
+#include "plank_topology.h"
 #include "platform/common.h"
 #include "process.h"
 #include "raw_hid_tablet.h"
-#include "session_stream.h"
 #include "session/session_context.h"
+#include "session_stream.h"
 #include "stream.h"
-#include "plank_bitrate.h"
-#include "plank_topology.h"
 #include "sync.h"
 #include "thread_safe.h"
 #include "utility.h"
 
 #ifdef PLANK_TRANSPORT
   #include "raw_hid_feedback.h"
+
   #include <plank_transport.h>
   #include <plank_transport_control.h>
   #include <plank_transport_event.h>
@@ -43,9 +44,9 @@ extern "C" {
 #endif
 
 #if defined(__linux__) && defined(SUNSHINE_BUILD_X11)
-  #include "platform/linux/graphics.h"
-  #include "platform/linux/x11grab.h"
+  #include "platform/linux/cursor_image.h"
   #include "platform/linux/x11_clipboard.h"
+  #include "platform/linux/x11grab.h"
 #endif
 
 #ifdef PLANK_TRANSPORT
@@ -108,14 +109,13 @@ namespace stream {
     } audio;  ///< Native audio timestamp state for the stream.
 
     struct {
-      safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;
       raw_hid::feedback_queue_t raw_hid_feedback_queue;
       std::optional<std::vector<std::uint8_t>> raw_hid_pending;  ///< Unsent reliable tablet request, retained across transport backpressure.
       safe::mail_raw_t::queue_t<std::vector<std::vector<std::uint8_t>>> cursor_shape_queue;
       safe::mail_raw_t::event_t<PLANK_CURSOR_POSITION_WIRE_MESSAGE> cursor_position_event;
-      safe::mail_raw_t::event_t<std::vector<std::vector<std::uint8_t>>> clipboard_offer_queue; ///< Latest local offer only.
-      std::vector<std::vector<std::uint8_t>> clipboard_pending; ///< Control-thread-owned in-flight offer.
-      std::size_t clipboard_next = 0; ///< First chunk not yet accepted by transport.
+      safe::mail_raw_t::event_t<std::vector<std::vector<std::uint8_t>>> clipboard_offer_queue;  ///< Latest local offer only.
+      std::vector<std::vector<std::uint8_t>> clipboard_pending;  ///< Control-thread-owned in-flight offer.
+      std::size_t clipboard_next = 0;  ///< First chunk not yet accepted by transport.
     } control;  ///< Native Host-to-Client event queues.
 
     std::string input_session_id;  ///< Internal desktop key retaining input devices across resume.
@@ -172,16 +172,16 @@ namespace stream {
   }
 
   /**
-   * @brief Send the selected HDR mode to the connected client over the control channel.
+   * @brief Send a native event to the connected Client.
    *
    * @param session Active streaming or pairing session for the request.
-   * @param hdr_info HDR info.
+   * @param type Native event type.
+   * @param payload Event bytes.
+   * @param payload_size Number of event bytes.
    * @return 0 when the control message is queued; nonzero when no control peer is ready.
    */
 #ifdef PLANK_TRANSPORT
-  int send_plank_transport_event(session_t *session, std::uint16_t type,
-                           const std::uint8_t *payload,
-                           std::size_t payload_size) {
+  int send_plank_transport_event(session_t *session, std::uint16_t type, const std::uint8_t *payload, std::size_t payload_size) {
     if (!session->plank_transport_endpoint || !payload || payload_size == 0 ||
         payload_size > UINT16_MAX) {
       return -1;
@@ -191,15 +191,22 @@ namespace stream {
     );
     std::size_t packet_size = 0;
     if (plank_transport_event_encode(
-          type, payload, payload_size, packet.data(), packet.size(),
-          &packet_size) != 0) {
+          type,
+          payload,
+          payload_size,
+          packet.data(),
+          packet.size(),
+          &packet_size
+        ) != 0) {
       return -1;
     }
     auto *endpoint = static_cast<PlankTransportNativeEndpoint *>(
       session->plank_transport_endpoint.get()
     );
     return plank_transport_native_data_send(
-      endpoint, packet.data(), packet_size
+      endpoint,
+      packet.data(),
+      packet_size
     );
   }
 
@@ -211,8 +218,12 @@ namespace stream {
     std::array<std::uint8_t, PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE> packet {};
     std::size_t packet_size = 0;
     if (plank_transport_control_encode(
-          PLANK_TRANSPORT_CONTROL_HOST_TERMINATE, values, std::size(values),
-          packet.data(), packet.size(), &packet_size
+          PLANK_TRANSPORT_CONTROL_HOST_TERMINATE,
+          values,
+          std::size(values),
+          packet.data(),
+          packet.size(),
+          &packet_size
         ) != 0) {
       return -1;
     }
@@ -220,45 +231,14 @@ namespace stream {
       session->plank_transport_endpoint.get()
     );
     return plank_transport_native_data_send(
-      endpoint, packet.data(), packet_size
-    ) == PLANK_TRANSPORT_OK ? 0 : -1;
+             endpoint,
+             packet.data(),
+             packet_size
+           ) == PLANK_TRANSPORT_OK ?
+             0 :
+             -1;
   }
 #endif
-
-  int send_hdr_mode(session_t *session, video::hdr_info_t hdr_info) {
-#ifdef PLANK_TRANSPORT
-    if (!session->plank_transport_endpoint) {
-      return -1;
-    }
-    std::array<std::uint8_t, PLANK_TRANSPORT_EVENT_HDR_MODE_SIZE> payload {};
-    payload[0] = hdr_info->enabled ? 1 : 0;
-    std::size_t offset = 2;
-    for (const auto &primary : hdr_info->metadata.displayPrimaries) {
-      plank_transport_event_write_u16(payload.data() + offset, primary.x);
-      plank_transport_event_write_u16(payload.data() + offset + 2, primary.y);
-      offset += 4;
-    }
-    plank_transport_event_write_u16(payload.data() + offset, hdr_info->metadata.whitePoint.x);
-    plank_transport_event_write_u16(payload.data() + offset + 2, hdr_info->metadata.whitePoint.y);
-    offset += 4;
-    plank_transport_event_write_u16(payload.data() + offset, hdr_info->metadata.maxDisplayLuminance);
-    plank_transport_event_write_u16(payload.data() + offset + 2, hdr_info->metadata.minDisplayLuminance);
-    plank_transport_event_write_u16(payload.data() + offset + 4, hdr_info->metadata.maxContentLightLevel);
-    plank_transport_event_write_u16(payload.data() + offset + 6, hdr_info->metadata.maxFrameAverageLightLevel);
-    plank_transport_event_write_u16(payload.data() + offset + 8, hdr_info->metadata.maxFullFrameLuminance);
-    const auto result = send_plank_transport_event(
-      session, PLANK_TRANSPORT_EVENT_HDR_MODE, payload.data(), payload.size()
-    );
-    if (!result) {
-      BOOST_LOG(debug) << "Sent HDR mode over native KyProto: "sv << hdr_info->enabled;
-    }
-    return result;
-#else
-    (void) session;
-    (void) hdr_info;
-    return -1;
-#endif
-  }
 
   /**
    * @brief Send one raw HID control frame over the encrypted reliable control stream.
@@ -277,7 +257,10 @@ namespace stream {
       return -1;
     }
     return send_plank_transport_event(
-      session, PLANK_TRANSPORT_EVENT_RAW_HID_WACOM, frame.data(), frame.size()
+      session,
+      PLANK_TRANSPORT_EVENT_RAW_HID_WACOM,
+      frame.data(),
+      frame.size()
     );
 #else
     (void) session;
@@ -295,7 +278,10 @@ namespace stream {
       return -1;
     }
     return send_plank_transport_event(
-      session, PLANK_TRANSPORT_EVENT_CURSOR_SHAPE, frame.data(), frame.size()
+      session,
+      PLANK_TRANSPORT_EVENT_CURSOR_SHAPE,
+      frame.data(),
+      frame.size()
     );
 #else
     (void) session;
@@ -312,8 +298,10 @@ namespace stream {
       return -1;
     }
     return send_plank_transport_event(
-      session, PLANK_TRANSPORT_EVENT_CURSOR_POSITION,
-      reinterpret_cast<const std::uint8_t *>(&position), sizeof(position)
+      session,
+      PLANK_TRANSPORT_EVENT_CURSOR_POSITION,
+      reinterpret_cast<const std::uint8_t *>(&position),
+      sizeof(position)
     );
 #else
     (void) session;
@@ -324,7 +312,7 @@ namespace stream {
 
   bool clipboard_sync_enabled(const session_t *session) {
     return session != nullptr &&
-      (session->plank_feature_flags & plank::topology::feature_clipboard_sync) != 0;
+           (session->plank_feature_flags & plank::topology::feature_clipboard_sync) != 0;
   }
 
   bool clipboard_backend_available(const session_t *session) {
@@ -352,7 +340,10 @@ namespace stream {
       return -1;
     }
     return send_plank_transport_event(
-      session, PLANK_TRANSPORT_EVENT_CLIPBOARD_OFFER, frame.data(), frame.size()
+      session,
+      PLANK_TRANSPORT_EVENT_CLIPBOARD_OFFER,
+      frame.data(),
+      frame.size()
     );
 #else
     (void) session;
@@ -363,7 +354,9 @@ namespace stream {
   bool queue_clipboard_offer(session_t *session, const std::string &text) {
     if (text.empty() || text.size() > PLANK_CLIPBOARD_MAX_TEXT_SIZE ||
         !clipboard::valid_utf8(
-          reinterpret_cast<const std::uint8_t *>(text.data()), text.size())) {
+          reinterpret_cast<const std::uint8_t *>(text.data()),
+          text.size()
+        )) {
       return false;
     }
     const auto total_size = static_cast<std::uint32_t>(text.size());
@@ -371,7 +364,8 @@ namespace stream {
     std::vector<std::vector<std::uint8_t>> frames;
     for (std::uint32_t offset = 0; offset < total_size;) {
       const auto chunk_size = std::min<std::uint32_t>(
-        PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE, total_size - offset
+        PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE,
+        total_size - offset
       );
       std::vector<std::uint8_t> frame(sizeof(PLANK_CLIPBOARD_WIRE_HEADER) + chunk_size);
       PLANK_CLIPBOARD_WIRE_HEADER header {};
@@ -401,8 +395,7 @@ namespace stream {
     return true;
   }
 
-  bool queue_client_clipboard_offer(session_t *session,
-                                    std::vector<std::uint8_t> text) {
+  bool queue_client_clipboard_offer(session_t *session, std::vector<std::uint8_t> text) {
     if (!clipboard::valid_utf8(text.data(), text.size())) {
       return false;
     }
@@ -413,9 +406,7 @@ namespace stream {
     return true;
   }
 
-  bool handle_client_clipboard_offer(session_t *session,
-                                     const std::uint8_t *payload,
-                                     std::size_t payload_size) {
+  bool handle_client_clipboard_offer(session_t *session, const std::uint8_t *payload, std::size_t payload_size) {
     if (!clipboard_sync_enabled(session) || !clipboard_backend_available(session) ||
         payload == nullptr ||
         payload_size < sizeof(PLANK_CLIPBOARD_WIRE_HEADER) ||
@@ -424,7 +415,9 @@ namespace stream {
     }
 
     auto result = session->client_clipboard_receiver.append(
-      payload, payload_size, PLANK_CLIPBOARD_MAX_INPUT_CHUNK_SIZE
+      payload,
+      payload_size,
+      PLANK_CLIPBOARD_MAX_INPUT_CHUNK_SIZE
     );
     switch (result.status) {
       case clipboard::receive_status_e::ignored:
@@ -438,8 +431,7 @@ namespace stream {
     return false;
   }
 
-  bool queue_cursor_shape(session_t *session, egl::cursor_t &image,
-                          unsigned long &queued_serial) {
+  bool queue_cursor_shape(session_t *session, platf::cursor_image_t &image, unsigned long &queued_serial) {
     if (image.serial == queued_serial) {
       return true;
     }
@@ -469,7 +461,8 @@ namespace stream {
     std::vector<std::vector<std::uint8_t>> frames;
     for (std::uint32_t offset = 0; offset < image_size;) {
       const auto chunk_size = std::min<std::uint32_t>(
-        PLANK_CURSOR_MAX_CHUNK_SIZE, image_size - offset
+        PLANK_CURSOR_MAX_CHUNK_SIZE,
+        image_size - offset
       );
       std::vector<std::uint8_t> frame(sizeof(PLANK_CURSOR_WIRE_HEADER) + chunk_size);
       PLANK_CURSOR_WIRE_HEADER header {};
@@ -477,8 +470,12 @@ namespace stream {
       write_cursor_little(header.version, static_cast<std::uint16_t>(PLANK_CURSOR_WIRE_VERSION));
       write_cursor_little(header.pixelFormat, static_cast<std::uint16_t>(PLANK_CURSOR_PIXEL_FORMAT_ARGB8888));
       std::uint32_t flags = image.visible ? PLANK_CURSOR_FLAG_VISIBLE : 0U;
-      if (offset == 0) flags |= PLANK_CURSOR_FLAG_FIRST_CHUNK;
-      if (offset + chunk_size == image_size) flags |= PLANK_CURSOR_FLAG_LAST_CHUNK;
+      if (offset == 0) {
+        flags |= PLANK_CURSOR_FLAG_FIRST_CHUNK;
+      }
+      if (offset + chunk_size == image_size) {
+        flags |= PLANK_CURSOR_FLAG_LAST_CHUNK;
+      }
       write_cursor_little(header.flags, flags);
       write_cursor_little(header.generation, static_cast<std::uint64_t>(image.serial));
       write_cursor_little(header.width, width);
@@ -503,9 +500,7 @@ namespace stream {
     return true;
   }
 
-  bool queue_cursor_position(session_t *session,
-                             const platf::x11::cursor_position_t &root_position,
-                             std::uint64_t &position_sequence) {
+  bool queue_cursor_position(session_t *session, const platf::x11::cursor_position_t &root_position, std::uint64_t &position_sequence) {
     if (root_position.desktop_width <= 0 || root_position.desktop_height <= 0 ||
         session->config.monitor.width <= 0 || session->config.monitor.height <= 0) {
       BOOST_LOG(error) << "Invalid desktop/video geometry for PLANK cursor position transport"sv;
@@ -519,20 +514,34 @@ namespace stream {
       frame_height / static_cast<double>(root_position.desktop_height)
     );
     const auto content_width = std::max(
-      1, static_cast<int>(root_position.desktop_width * scale));
+      1,
+      static_cast<int>(root_position.desktop_width * scale)
+    );
     const auto content_height = std::max(
-      1, static_cast<int>(root_position.desktop_height * scale));
+      1,
+      static_cast<int>(root_position.desktop_height * scale)
+    );
     const auto content_x = (frame_width - content_width) / 2;
     const auto content_y = (frame_height - content_height) / 2;
     const auto root_x = std::clamp(
-      root_position.x, 0, root_position.desktop_width - 1);
+      root_position.x,
+      0,
+      root_position.desktop_width - 1
+    );
     const auto root_y = std::clamp(
-      root_position.y, 0, root_position.desktop_height - 1);
+      root_position.y,
+      0,
+      root_position.desktop_height - 1
+    );
     const auto frame_x = std::clamp(
-      content_x + static_cast<int>(std::lround(root_x * scale)), 0, frame_width - 1
+      content_x + static_cast<int>(std::lround(root_x * scale)),
+      0,
+      frame_width - 1
     );
     const auto frame_y = std::clamp(
-      content_y + static_cast<int>(std::lround(root_y * scale)), 0, frame_height - 1
+      content_y + static_cast<int>(std::lround(root_y * scale)),
+      0,
+      frame_height - 1
     );
 
     PLANK_CURSOR_POSITION_WIRE_MESSAGE position {};
@@ -558,7 +567,7 @@ namespace stream {
       return;
     }
 
-    egl::cursor_t image {};
+    platf::cursor_image_t image {};
     unsigned long queued_serial = std::numeric_limits<unsigned long>::max();
     if (!cursor->capture(image) ||
         !queue_cursor_shape(session, image, queued_serial)) {
@@ -659,7 +668,8 @@ namespace stream {
     }
     auto *endpoint = static_cast<PlankTransportNativeEndpoint *>(session->plank_transport_endpoint.get());
     const auto rate_result = plank_transport_native_set_video_bitrate(
-      endpoint, static_cast<std::uint32_t>(requested_kbps),
+      endpoint,
+      static_cast<std::uint32_t>(requested_kbps),
       static_cast<std::uint32_t>(peak_kbps)
     );
     if (rate_result != PLANK_TRANSPORT_OK) {
@@ -676,11 +686,15 @@ namespace stream {
     std::array<std::uint8_t, PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE> packet {};
     std::size_t packet_size = 0;
     const auto encode_result = plank_transport_control_encode(
-      PLANK_TRANSPORT_CONTROL_VIDEO_BITRATE_APPLIED, values, std::size(values),
-      packet.data(), packet.size(), &packet_size
+      PLANK_TRANSPORT_CONTROL_VIDEO_BITRATE_APPLIED,
+      values,
+      std::size(values),
+      packet.data(),
+      packet.size(),
+      &packet_size
     );
     const auto result = encode_result != 0 ? PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT :
-      plank_transport_native_data_send(endpoint, packet.data(), packet_size);
+                                             plank_transport_native_data_send(endpoint, packet.data(), packet_size);
     if (result != PLANK_TRANSPORT_OK) {
       BOOST_LOG(error) << "PlankTransport bitrate acknowledgement failed with result "sv
                        << result;
@@ -698,8 +712,7 @@ namespace stream {
   }
 
 #ifdef PLANK_TRANSPORT
-  void drain_plank_transport_control(session_t *session,
-                               std::array<std::uint8_t, PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE> &packet) {
+  void drain_plank_transport_control(session_t *session, std::array<std::uint8_t, PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE> &packet) {
     if (!session->plank_transport_endpoint) {
       return;
     }
@@ -708,7 +721,12 @@ namespace stream {
     for (int drained = 0; drained < PLANK_TRANSPORT_CONTROL_DRAIN_LIMIT; ++drained) {
       std::size_t packet_size = 0;
       const auto result = plank_transport_native_data_receive(
-        endpoint, packet.data(), packet.size(), &packet_size, 0);
+        endpoint,
+        packet.data(),
+        packet.size(),
+        &packet_size,
+        0
+      );
       if (result == PLANK_TRANSPORT_TIMEOUT) {
         return;
       }
@@ -756,23 +774,25 @@ namespace stream {
             return;
           }
           session->video.invalidate_ref_frames_events->raise(
-            std::make_pair(plank_transport_control_read_u32(control.payload),
-                           plank_transport_control_read_u32(control.payload + 4))
+            std::make_pair(plank_transport_control_read_u32(control.payload), plank_transport_control_read_u32(control.payload + 4))
           );
           break;
-        case PLANK_TRANSPORT_CONTROL_SET_VIDEO_BITRATE: {
-          const auto bitrate = control.payload_size == sizeof(std::uint32_t) ?
-            plank::bitrate::validate_target(
-              plank_transport_control_read_u32(control.payload)) : std::nullopt;
-          if (!bitrate) {
-            BOOST_LOG(error) << "Rejected malformed PlankTransport bitrate request"sv;
-            session::stop(*session);
-            return;
+        case PLANK_TRANSPORT_CONTROL_SET_VIDEO_BITRATE:
+          {
+            const auto bitrate = control.payload_size == sizeof(std::uint32_t) ?
+                                   plank::bitrate::validate_target(
+                                     plank_transport_control_read_u32(control.payload)
+                                   ) :
+                                   std::nullopt;
+            if (!bitrate) {
+              BOOST_LOG(error) << "Rejected malformed PlankTransport bitrate request"sv;
+              session::stop(*session);
+              return;
+            }
+            session->mail->event<int>(mail::video_bitrate)->raise(*bitrate);
+            send_video_bitrate_applied(session, *bitrate);
+            break;
           }
-          session->mail->event<int>(mail::video_bitrate)->raise(*bitrate);
-          send_video_bitrate_applied(session, *bitrate);
-          break;
-        }
         default:
           BOOST_LOG(error) << "Rejected unexpected client PlankTransport control type "sv
                            << control.type;
@@ -823,17 +843,11 @@ namespace stream {
             session->cursorThread = std::jthread(localCursorThread, session);
           }
 
-          auto &hdr_queue = session->control.hdr_queue;
-          while (hdr_queue->peek()) {
-            send_hdr_mode(session, hdr_queue->pop());
-          }
-
           auto &raw_hid_feedback_queue = session->control.raw_hid_feedback_queue;
           auto &raw_hid_pending = session->control.raw_hid_pending;
-          const auto raw_hid_result = raw_hid::drain_feedback(raw_hid_feedback_queue, raw_hid_pending,
-            [&](const auto &frame) {
-              return send_raw_hid_control(session, frame);
-            });
+          const auto raw_hid_result = raw_hid::drain_feedback(raw_hid_feedback_queue, raw_hid_pending, [&](const auto &frame) {
+            return send_raw_hid_control(session, frame);
+          });
           if (raw_hid_result != PLANK_TRANSPORT_OK && raw_hid_result != PLANK_TRANSPORT_TIMEOUT) {
             BOOST_LOG(warning) << "Unable to retain reliable raw HID control; releasing session input"sv;
             session::stop(*session);
@@ -866,7 +880,8 @@ namespace stream {
           // retain precisely the unsent chunk instead of restarting a copy.
           for (unsigned count = 0; count < 2 && control.clipboard_next < control.clipboard_pending.size(); ++count) {
             const auto result = send_clipboard_offer_control(session, control.clipboard_pending[control.clipboard_next]);
-            if (result == PLANK_TRANSPORT_TIMEOUT) break;
+            if (result == PLANK_TRANSPORT_TIMEOUT)
+              break;
             if (result != PLANK_TRANSPORT_OK) {
               BOOST_LOG(warning) << "Unable to send a PLANK clipboard offer chunk"sv;
               session::stop(*session);
@@ -875,7 +890,8 @@ namespace stream {
             ++control.clipboard_next;
           }
           if (control.clipboard_next == control.clipboard_pending.size()) {
-            control.clipboard_pending.clear(); control.clipboard_next = 0;
+            control.clipboard_pending.clear();
+            control.clipboard_next = 0;
           }
 
           ++pos;
@@ -896,7 +912,8 @@ namespace stream {
     for (auto *session : *ctx->sessions) {
 #ifdef PLANK_TRANSPORT
       if (send_host_termination(
-            session, PLANK_TRANSPORT_TERMINATION_GRACEFUL
+            session,
+            PLANK_TRANSPORT_TERMINATION_GRACEFUL
           ) != 0) {
         BOOST_LOG(warning) << "Couldn't send PlankTransport termination code"sv;
       }
@@ -920,10 +937,13 @@ namespace stream {
     platf::adjust_thread_priority(platf::thread_priority_e::high);
 
     logging::min_max_avg_periodic_logger<double> frame_processing_latency_logger(
-      debug, "Frame processing latency", "ms"
+      debug,
+      "Frame processing latency",
+      "ms"
     );
     logging::time_delta_periodic_logger frame_transport_latency_logger(
-      debug, "Native transport: video submission latency"
+      debug,
+      "Native transport: video submission latency"
     );
 
     while (auto packet = packets->pop()) {
@@ -933,7 +953,8 @@ namespace stream {
 
       auto *session = static_cast<session_t *>(packet->channel_data);
       std::string_view payload {
-        reinterpret_cast<char *>(packet->data()), packet->data_size()
+        reinterpret_cast<char *>(packet->data()),
+        packet->data_size()
       };
       std::vector<std::uint8_t> replaced_payload;
       if (packet->is_idr() && packet->replacements) {
@@ -974,16 +995,19 @@ namespace stream {
       using native_video_tick =
         std::chrono::duration<std::uint64_t, std::ratio<1, 90000>>;
       frame_info.pts = std::chrono::duration_cast<native_video_tick>(
-        frame_time - video_epoch
-      ).count();
+                         frame_time - video_epoch
+      )
+                         .count();
 
       if (packet->frame_timestamp) {
         const auto latency_us = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now() - *packet->frame_timestamp
-        ).count();
+                                  std::chrono::steady_clock::now() - *packet->frame_timestamp
+        )
+                                  .count();
         const auto latency_tenths_ms = static_cast<std::uint16_t>(
           std::clamp<decltype(latency_us)>(
-            (latency_us + 50) / 100, 0,
+            (latency_us + 50) / 100,
+            0,
             std::numeric_limits<std::uint16_t>::max()
           )
         );
@@ -996,8 +1020,10 @@ namespace stream {
       );
       frame_transport_latency_logger.first_point_now();
       const auto result = plank_transport_native_video_send(
-        endpoint, &frame_info,
-        reinterpret_cast<const std::uint8_t *>(payload.data()), payload.size()
+        endpoint,
+        &frame_info,
+        reinterpret_cast<const std::uint8_t *>(payload.data()),
+        payload.size()
       );
       frame_transport_latency_logger.second_point_now_and_log();
       if (result < PLANK_TRANSPORT_OK) {
@@ -1058,7 +1084,10 @@ namespace stream {
         session->plank_transport_endpoint.get()
       );
       const auto result = plank_transport_native_audio_send(
-        endpoint, &packet_info, packet_data.begin(), packet_data.size()
+        endpoint,
+        &packet_info,
+        packet_data.begin(),
+        packet_data.size()
       );
       if (result < PLANK_TRANSPORT_OK) {
         const auto state = plank_transport_native_endpoint_state(endpoint);
@@ -1171,7 +1200,12 @@ namespace stream {
       std::uint8_t type = 0;
       std::size_t payload_size = 0;
       const auto result = plank_transport_native_input_receive(
-        endpoint, &type, payload.data(), payload.size(), &payload_size, 50
+        endpoint,
+        &type,
+        payload.data(),
+        payload.size(),
+        &payload_size,
+        50
       );
       if (result == PLANK_TRANSPORT_TIMEOUT) {
         continue;
@@ -1196,7 +1230,10 @@ namespace stream {
       }
       if (type == PLANK_TRANSPORT_INPUT_CLIPBOARD_OFFER) {
         if (!handle_client_clipboard_offer(
-              session, payload.data(), payload_size)) {
+              session,
+              payload.data(),
+              payload_size
+            )) {
           BOOST_LOG(error) << "Rejected malformed PLANK clipboard offer from client"sv;
           session::stop(*session);
           return;
@@ -1253,11 +1290,14 @@ namespace stream {
 
     void notify_desktop_handoff(session_t &session) {
 #ifdef PLANK_TRANSPORT
-      if (state(session) != state_e::RUNNING || !session.plank_transport_endpoint) return;
+      if (state(session) != state_e::RUNNING || !session.plank_transport_endpoint) {
+        return;
+      }
       std::array<std::uint8_t, PLANK_TRANSPORT_CONTROL_HEADER_SIZE> packet {};
       std::size_t size = 0;
-      if (plank_transport_control_encode(PLANK_TRANSPORT_CONTROL_HOST_DESKTOP_HANDOFF,
-            nullptr, 0, packet.data(), packet.size(), &size) != 0) return;
+      if (plank_transport_control_encode(PLANK_TRANSPORT_CONTROL_HOST_DESKTOP_HANDOFF, nullptr, 0, packet.data(), packet.size(), &size) != 0) {
+        return;
+      }
       auto *endpoint = static_cast<PlankTransportNativeEndpoint *>(session.plank_transport_endpoint.get());
       if (plank_transport_native_data_send(endpoint, packet.data(), size) != PLANK_TRANSPORT_OK) {
         BOOST_LOG(warning) << "Couldn't announce desktop handoff; client will use ordinary reconnect status"sv;
@@ -1313,7 +1353,9 @@ namespace stream {
         auto *endpoint = static_cast<PlankTransportNativeEndpoint *>(session.plank_transport_endpoint.get());
         std::array<char, 1024> endpoint_error {};
         const auto endpoint_error_size = plank_transport_native_endpoint_last_error(
-          endpoint, endpoint_error.data(), endpoint_error.size()
+          endpoint,
+          endpoint_error.data(),
+          endpoint_error.size()
         );
         if (endpoint_error_size != 0) {
           BOOST_LOG(error) << "PlankTransport native endpoint ended: "sv
@@ -1425,7 +1467,6 @@ namespace stream {
 
       session->config = config;
 
-      session->control.hdr_queue = mail->event<video::hdr_info_t>(mail::hdr);
       session->control.raw_hid_feedback_queue = mail->queue<std::vector<std::uint8_t>>(mail::raw_hid_feedback);
       session->control.cursor_shape_queue =
         mail->queue<std::vector<std::vector<std::uint8_t>>>(mail::cursor_shape);

@@ -43,7 +43,6 @@ namespace cuda {
     std::vector<std::string> display_names();
   }
 
-  std::unique_ptr<platf::avcodec_encode_device_t> make_avcodec_encode_device(int width, int height, bool vram);
   /**
    * @brief Create an NvFBC CUDA-to-CPU encode device for x264.
    *
@@ -56,22 +55,6 @@ namespace cuda {
   std::unique_ptr<platf::nvenc_encode_device_t> make_nvenc_encode_device(int width, int height, platf::pix_fmt_e pix_fmt);
   std::unique_ptr<platf::nvenc_encode_device_t> make_nvenc_native10_encode_device(int width, int height, platf::pix_fmt_e pix_fmt);
 
-  /**
-   * @brief Create a GL->CUDA encoding device for consuming captured dmabufs.
-   * @param in_width Width of captured frames.
-   * @param in_height Height of captured frames.
-   * @param offset_x Offset of content in captured frame.
-   * @param offset_y Offset of content in captured frame.
-   * @return FFmpeg encoding device context.
-   */
-  std::unique_ptr<platf::avcodec_encode_device_t> make_avcodec_gl_encode_device(int width, int height, int offset_x, int offset_y);
-
-  int init();
-
-  #if defined(SUNSHINE_TESTS)
-  bool test_identity_gbr_8bit_conversion();
-  bool test_identity_gbr_10bit_conversion();
-  #endif
 }  // namespace cuda
 
 typedef struct cudaArray *cudaArray_t;
@@ -101,17 +84,7 @@ namespace cuda {
 
   stream_t make_stream(int flags = 0);
 
-  int scale_xrgb10_to_yuv444_10bit(std::uintptr_t source,
-                                   std::uint32_t source_pitch,
-                                   int source_width,
-                                   int source_height,
-                                   std::uint8_t *Y,
-                                   std::uint8_t *U,
-                                   std::uint8_t *V,
-                                   std::uint32_t destination_pitch,
-                                   int destination_width,
-                                   int destination_height,
-                                   stream_t::pointer stream);
+  int scale_xrgb10_to_yuv444_10bit(std::uintptr_t source, std::uint32_t source_pitch, int source_width, int source_height, std::uint8_t *Y, std::uint8_t *U, std::uint8_t *V, std::uint32_t destination_pitch, int destination_width, int destination_height, stream_t::pointer stream);
 
   struct viewport_t {
     int width;
@@ -211,7 +184,9 @@ namespace cuda {
     int resize(cudaTextureObject_t source, stream_t::pointer stream);
 
     /** @brief Return the point-sampled float texture for scale-1 conversion. */
-    cudaTextureObject_t texture() const { return texture_; }
+    cudaTextureObject_t texture() const {
+      return texture_;
+    }
 
   private:
     area_scaler_t() = default;

@@ -74,7 +74,7 @@ if(CUDA_FOUND)
     add_compile_definitions(SUNSHINE_BUILD_CUDA)
 endif()
 
-# DRM/KMS helpers share the capture device with CUDA.
+# DRM device discovery supports the CUDA capture device.
 if(${SUNSHINE_ENABLE_DRM})
     find_package(LIBDRM REQUIRED)
 else()
@@ -85,9 +85,6 @@ if(LIBDRM_FOUND)
     if(${SUNSHINE_ENABLE_DRM})
         list(APPEND PLATFORM_LIBRARIES ${LIBDRM_LIBRARIES})
         add_compile_definitions(SUNSHINE_BUILD_DRM)
-        list(APPEND PLATFORM_TARGET_FILES
-                "${CMAKE_SOURCE_DIR}/src/platform/linux/kmsgrab.cpp")
-        list(APPEND SUNSHINE_DEFINITIONS EGL_NO_X11=1)
     endif()
 endif()
 
@@ -146,8 +143,7 @@ include_directories(SYSTEM
 
 list(APPEND PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/linux/publish.cpp"
-        "${CMAKE_SOURCE_DIR}/src/platform/linux/graphics.h"
-        "${CMAKE_SOURCE_DIR}/src/platform/linux/graphics.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/linux/cursor_image.h"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/misc.h"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/misc.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/linux/audio.cpp")
@@ -156,5 +152,3 @@ list(APPEND PLATFORM_LIBRARIES
         dl
         pulse
         pulse-simple)
-
-list(APPEND SUNSHINE_EXTERNAL_LIBRARIES glad)

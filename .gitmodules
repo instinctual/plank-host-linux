@@ -6,9 +6,6 @@
 	path = third-party/doxyconfig
 	url = https://github.com/LizardByte/doxyconfig.git
 	branch = master
-[submodule "third-party/glad"]
-	path = third-party/glad
-	url = https://github.com/Dav1dde/glad.git
 [submodule "third-party/libvirtualhid"]
 	path = third-party/libvirtualhid
 	url = https://github.com/instinctual/plank-libvirtualhid.git

@@ -27,7 +27,6 @@ namespace video {
     rec601,  ///< Rec. 601
     rec709,  ///< Rec. 709
     bt2020sdr,  ///< Rec. 2020 SDR
-    bt2020,  ///< Rec. 2020 HDR
     identity_gbr,  ///< Full-range identity mapping with Y=G, U=B, and V=R
   };
 
@@ -40,14 +39,6 @@ namespace video {
     unsigned bit_depth;  ///< Bit depth.
   };
 
-  /**
-   * @brief Check whether a Sunshine colorspace represents HDR video.
-   *
-   * @param colorspace Colorimetry information used for conversion or encoding.
-   * @return True when the colorspace values describe the same metadata.
-   */
-  bool colorspace_is_hdr(const sunshine_colorspace_t &colorspace);
-
   // Declared in video.h
   struct config_t;
 
@@ -55,10 +46,9 @@ namespace video {
    * @brief Derive Sunshine colorspace metadata from the negotiated client config.
    *
    * @param config Configuration values to apply.
-   * @param hdr_display HDR display.
-   * @return Colorspace, range, transfer, and HDR flags used for encoding.
+   * @return SDR colorspace, range and bit depth used for encoding.
    */
-  sunshine_colorspace_t colorspace_from_client_config(const config_t &config, bool hdr_display);
+  sunshine_colorspace_t colorspace_from_client_config(const config_t &config);
 
   /**
    * @brief FFmpeg colorimetry values used by AVCodec encoders.

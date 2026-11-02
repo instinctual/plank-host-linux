@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstring>
 #include <future>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -239,6 +240,60 @@ TEST_F(InputRetainedSessionTest, DisconnectReleasesNormalizedPenWithoutViewport)
 }
 
 #ifdef PLANK_TRANSPORT
+TEST_F(InputRetainedSessionTest, NativeButtonsAndSignedScrollReachThePlatformDirectly) {
+  std::uint64_t lease = 0;
+  auto session = allocate("native-pointer-wire", lease);
+  std::array<std::uint8_t, PLANK_TRANSPORT_INPUT_MOUSE_BUTTON_SIZE> button {1, PLANK_TRANSPORT_INPUT_ACTION_PRESS};
+  const auto before = mouse->submit_count();
+  ASSERT_TRUE(input::native(session, PLANK_TRANSPORT_INPUT_MOUSE_BUTTON, button.data(), button.size()));
+  ASSERT_EQ(mouse->submit_count(), before + 1);
+  EXPECT_EQ(mouse->last_submitted_event().button, lvh::MouseButton::left);
+  EXPECT_TRUE(mouse->last_submitted_event().pressed);
+  button[1] = PLANK_TRANSPORT_INPUT_ACTION_RELEASE;
+  ASSERT_TRUE(input::native(session, PLANK_TRANSPORT_INPUT_MOUSE_BUTTON, button.data(), button.size()));
+  EXPECT_FALSE(mouse->last_submitted_event().pressed);
+  button[1] = 2;
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_MOUSE_BUTTON, button.data(), button.size()));
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_MOUSE_BUTTON, button.data(), button.size() - 1));
+  EXPECT_EQ(mouse->submit_count(), before + 2);
+
+  std::array<std::uint8_t, PLANK_TRANSPORT_INPUT_SCROLL_SIZE> scroll {};
+  for (const auto distance : {-32768, -120, -1, 1, 120, 32767}) {
+    plank_transport_input_write_u16(scroll.data(), static_cast<std::uint16_t>(distance));
+    ASSERT_TRUE(input::native(session, PLANK_TRANSPORT_INPUT_VERTICAL_SCROLL, scroll.data(), scroll.size()));
+    EXPECT_EQ(mouse->last_submitted_event().kind, lvh::MouseEventKind::vertical_scroll);
+    EXPECT_EQ(mouse->last_submitted_event().high_resolution_scroll, distance);
+    ASSERT_TRUE(input::native(session, PLANK_TRANSPORT_INPUT_HORIZONTAL_SCROLL, scroll.data(), scroll.size()));
+    EXPECT_EQ(mouse->last_submitted_event().kind, lvh::MouseEventKind::horizontal_scroll);
+    EXPECT_EQ(mouse->last_submitted_event().high_resolution_scroll, distance);
+  }
+}
+
+TEST_F(InputRetainedSessionTest, NativeKeyboardAndMalformedPayloadBoundaries) {
+  std::uint64_t lease = 0;
+  auto session = allocate("native-keyboard-wire", lease);
+  std::array<std::uint8_t, PLANK_TRANSPORT_INPUT_KEYBOARD_SIZE> key {};
+  plank_transport_input_write_u16(key.data(), 0x41);
+  key[2] = PLANK_TRANSPORT_INPUT_ACTION_PRESS;
+  ASSERT_TRUE(input::native(session, PLANK_TRANSPORT_INPUT_KEYBOARD, key.data(), key.size()));
+  EXPECT_EQ(input::testing::last_keyboard_code(), 0x41);
+  key[2] = PLANK_TRANSPORT_INPUT_ACTION_RELEASE;
+  ASSERT_TRUE(input::native(session, PLANK_TRANSPORT_INPUT_KEYBOARD, key.data(), key.size()));
+  key[2] = 2;
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_KEYBOARD, key.data(), key.size()));
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_KEYBOARD, key.data(), key.size() - 1));
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_KEYBOARD, nullptr, key.size()));
+  EXPECT_FALSE(input::native(session, 255, key.data(), key.size()));
+  std::array<std::uint8_t, PLANK_TRANSPORT_INPUT_UTF8_TEXT_MAX_SIZE + 1> oversized {};
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_UTF8_TEXT, oversized.data(), oversized.size()));
+  std::array<std::uint8_t, PLANK_TRANSPORT_INPUT_PEN_SIZE> pen {};
+  plank_transport_input_encode_pen(pen.data(), LI_TOUCH_EVENT_HOVER, LI_TOOL_TYPE_PEN, 0, 0, 0, std::numeric_limits<float>::quiet_NaN(), 0, 0, 0, 0);
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_PEN, pen.data(), pen.size()));
+  plank_transport_input_write_float(pen.data() + 8, 0.5F);
+  pen[6] = 1;
+  EXPECT_FALSE(input::native(session, PLANK_TRANSPORT_INPUT_PEN, pen.data(), pen.size()));
+}
+
 TEST_F(InputRetainedSessionTest, NativePenCancelDoesNotRequireDisplayGeometry) {
   std::uint64_t lease = 0;
   auto session = allocate("cancel-without-viewport", lease);
@@ -515,36 +570,21 @@ TEST_F(InputRetainedSessionTest, ExactRawTabletSuppressesNormalizedFallbackUntil
   // the generic fallback to raw HID only after all descriptors are accepted
   // and exact UHID endpoints exist.
   const std::uint8_t descriptor[] {
-    0x05, 0x01,  // Usage Page (Generic Desktop)
-    0x09, 0x02,  // Usage (Mouse)
-    0xa1, 0x01,  // Collection (Application)
+    0x05,
+    0x01,  // Usage Page (Generic Desktop)
+    0x09,
+    0x02,  // Usage (Mouse)
+    0xa1,
+    0x01,  // Collection (Application)
     0xc0,  // End Collection
   };
-  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(
-                                                        PLANK_RAW_HID_DESCRIPTOR,
-                                                        0,
-                                                        generation,
-                                                        descriptor,
-                                                        sizeof(descriptor)
-                                                      )));
+  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(PLANK_RAW_HID_DESCRIPTOR, 0, generation, descriptor, sizeof(descriptor))));
   EXPECT_FALSE(input::testing::normalized_pen_enabled(session));
 
-  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(
-                                                        PLANK_RAW_HID_SUSPEND,
-                                                        0,
-                                                        generation,
-                                                        nullptr,
-                                                        0
-                                                      )));
+  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(PLANK_RAW_HID_SUSPEND, 0, generation, nullptr, 0)));
   EXPECT_FALSE(input::testing::normalized_pen_enabled(session));
 
-  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(
-                                                        PLANK_RAW_HID_DETACH,
-                                                        0,
-                                                        generation,
-                                                        nullptr,
-                                                        0
-                                                      )));
+  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(PLANK_RAW_HID_DETACH, 0, generation, nullptr, 0)));
   EXPECT_TRUE(input::testing::normalized_pen_enabled(session));
 }
 
@@ -560,18 +600,15 @@ TEST_F(InputRetainedSessionTest, NormalizedPenReleasesRetainedRawTabletEndpoints
   constexpr std::uint16_t generation = 12;
   ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_device_frame(generation, 0x0357)));
   const std::uint8_t descriptor[] {
-    0x05, 0x01,
-    0x09, 0x02,
-    0xa1, 0x01,
+    0x05,
+    0x01,
+    0x09,
+    0x02,
+    0xa1,
+    0x01,
     0xc0,
   };
-  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(
-                                                        PLANK_RAW_HID_DESCRIPTOR,
-                                                        0,
-                                                        generation,
-                                                        descriptor,
-                                                        sizeof(descriptor)
-                                                      )));
+  ASSERT_TRUE(input::testing::handle_raw_hid(session, make_raw_hid_frame(PLANK_RAW_HID_DESCRIPTOR, 0, generation, descriptor, sizeof(descriptor))));
   ASSERT_FALSE(input::testing::normalized_pen_enabled(session));
   ASSERT_EQ(input::testing::raw_hid_generation(session), generation);
 

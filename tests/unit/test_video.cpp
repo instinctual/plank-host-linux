@@ -61,7 +61,6 @@ TEST(VideoColorspaceTest, IdentityGbrUsesMatrixZeroMetadata) {
   EXPECT_EQ(avcodec.matrix, AVCOL_SPC_RGB);
   EXPECT_EQ(avcodec.range, AVCOL_RANGE_JPEG);
   EXPECT_STREQ(av_color_range_name(avcodec.range), "pc");
-  EXPECT_FALSE(video::colorspace_is_hdr(colorspace));
 }
 
 TEST(VideoColorspaceTest, EightBitExpansionUsesFullTenBitRange) {
@@ -76,18 +75,18 @@ TEST(VideoColorspaceTest, IdentityGbrRequiresFullRange444) {
   config.encoderCscMode = COLORSPACE_IDENTITY_GBR << 1;
   config.dynamicRange = 1;
   config.chromaSamplingType = 1;
-  EXPECT_EQ(video::colorspace_from_client_config(config, false).colorspace, video::colorspace_e::rec709);
+  EXPECT_EQ(video::colorspace_from_client_config(config).colorspace, video::colorspace_e::rec709);
 
   config.encoderCscMode |= 1;
   config.dynamicRange = 0;
-  EXPECT_EQ(video::colorspace_from_client_config(config, false).colorspace, video::colorspace_e::identity_gbr);
+  EXPECT_EQ(video::colorspace_from_client_config(config).colorspace, video::colorspace_e::identity_gbr);
 
   config.dynamicRange = 1;
   config.chromaSamplingType = 0;
-  EXPECT_EQ(video::colorspace_from_client_config(config, false).colorspace, video::colorspace_e::rec709);
+  EXPECT_EQ(video::colorspace_from_client_config(config).colorspace, video::colorspace_e::rec709);
 
   config.chromaSamplingType = 1;
-  EXPECT_EQ(video::colorspace_from_client_config(config, false).colorspace, video::colorspace_e::identity_gbr);
+  EXPECT_EQ(video::colorspace_from_client_config(config).colorspace, video::colorspace_e::identity_gbr);
 }
 
 TEST(VideoColorspaceTest, H264TenBit422RemainsSdrRec709OnHdrDisplay) {
@@ -97,37 +96,10 @@ TEST(VideoColorspaceTest, H264TenBit422RemainsSdrRec709OnHdrDisplay) {
   config.dynamicRange = 1;
   config.chromaSamplingType = 2;
 
-  const auto colorspace = video::colorspace_from_client_config(config, true);
+  const auto colorspace = video::colorspace_from_client_config(config);
   EXPECT_EQ(colorspace.colorspace, video::colorspace_e::rec709);
   EXPECT_TRUE(colorspace.full_range);
   EXPECT_EQ(colorspace.bit_depth, 10);
-}
-
-TEST(VideoEncoderTest, NativeX264RgbRequiresEightBitIdentity444OutsideCudaBackend) {
-  video::config_t config {};
-  config.videoFormat = 0;
-  config.dynamicRange = 0;
-  config.chromaSamplingType = 1;
-  const video::sunshine_colorspace_t identity_8bit {
-    video::colorspace_e::identity_gbr,
-    true,
-    8,
-  };
-
-  EXPECT_TRUE(video::use_native_x264rgb("software"sv, "libx264"sv, config, identity_8bit));
-  EXPECT_FALSE(video::use_native_x264rgb("software-cuda"sv, "libx264"sv, config, identity_8bit));
-
-  config.dynamicRange = 1;
-  EXPECT_FALSE(video::use_native_x264rgb("software"sv, "libx264"sv, config, identity_8bit));
-  config.dynamicRange = 0;
-  config.chromaSamplingType = 0;
-  EXPECT_FALSE(video::use_native_x264rgb("software"sv, "libx264"sv, config, identity_8bit));
-  config.chromaSamplingType = 1;
-
-  auto rec709 = identity_8bit;
-  rec709.colorspace = video::colorspace_e::rec709;
-  EXPECT_FALSE(video::use_native_x264rgb("software"sv, "libx264"sv, config, rec709));
-  EXPECT_FALSE(video::use_native_x264rgb("software"sv, "h264_nvenc"sv, config, identity_8bit));
 }
 
 TEST(VideoEncoderTest, SoftwareRateControlAllowsBoundedSceneCutBursts) {
@@ -151,26 +123,19 @@ TEST(VideoOutputTopologyTest, ResolvesOpaqueIdentityWithoutEnumerationIndex) {
 
 TEST(VideoOutputTopologyTest, GenerationTracksTopologyNotEnumerationOrder) {
   const std::vector<platf::display_info_t> outputs {
-    {.id = "x11:DP-1", .name = "DP-1", .capture_name = "DP-1", .x = 3840,
-     .y = 0, .width = 1280, .height = 2160, .rotation = 0,
-     .refresh_millihz = 59930, .primary = false},
-    {.id = "x11:DP-2", .name = "DP-2", .capture_name = "DP-2", .x = 0,
-     .y = 0, .width = 3840, .height = 2160, .rotation = 0,
-     .refresh_millihz = 59970, .primary = true},
+    {.id = "x11:DP-1", .name = "DP-1", .capture_name = "DP-1", .x = 3840, .y = 0, .width = 1280, .height = 2160, .rotation = 0, .refresh_millihz = 59930, .primary = false},
+    {.id = "x11:DP-2", .name = "DP-2", .capture_name = "DP-2", .x = 0, .y = 0, .width = 3840, .height = 2160, .rotation = 0, .refresh_millihz = 59970, .primary = true},
   };
   auto reordered = outputs;
   std::reverse(reordered.begin(), reordered.end());
-  EXPECT_EQ(video::output_topology_generation(outputs),
-            video::output_topology_generation(reordered));
+  EXPECT_EQ(video::output_topology_generation(outputs), video::output_topology_generation(reordered));
 
   auto changed = outputs;
   changed.front().x = 2560;
-  EXPECT_NE(video::output_topology_generation(outputs),
-            video::output_topology_generation(changed));
+  EXPECT_NE(video::output_topology_generation(outputs), video::output_topology_generation(changed));
   changed = outputs;
   changed.front().primary = true;
-  EXPECT_NE(video::output_topology_generation(outputs),
-            video::output_topology_generation(changed));
+  EXPECT_NE(video::output_topology_generation(outputs), video::output_topology_generation(changed));
 }
 
 TEST(VideoEncoderTest, SoftwareRateControlRetainsLegacyBufferSizingWhenDisabled) {
@@ -213,11 +178,11 @@ INSTANTIATE_TEST_SUITE_P(
   EncoderVariants,
   EncoderTest,
   testing::Values(
-#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+  #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
     &video::software_cuda,
     &video::nvenc_direct
 
-#endif
+  #endif
   ),
   [](const auto &info) {
     auto name = std::string(info.param->name);
@@ -227,12 +192,12 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 TEST_P(EncoderTest, ValidateEncoder) {
-#if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
+  #if defined(__linux__) && defined(SUNSHINE_BUILD_CUDA)
   if (GetParam() == &video::software_cuda) {
     EXPECT_TRUE(video::software_cuda.h264[video::encoder_t::YUV444]);
-    EXPECT_TRUE(video::software_cuda.h264[video::encoder_t::DYNAMIC_RANGE_YUV444]);
+    EXPECT_TRUE(video::software_cuda.h264[video::encoder_t::TEN_BIT_YUV444]);
   }
-#endif
+  #endif
 }
 #endif
 
@@ -258,7 +223,6 @@ INSTANTIATE_TEST_SUITE_P(
     std::make_tuple(2, AV_PROFILE_H264_HIGH_422)
   )
 );
-
 
 struct FramerateX100Test: BaseTest, testing::WithParamInterface<std::tuple<std::int32_t, AVRational>> {};
 

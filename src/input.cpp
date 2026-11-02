@@ -4,7 +4,6 @@
  */
 #include <cstdint>
 extern "C" {
-#include <moonlight-common-c/src/Input.h>
 #include <moonlight-common-c/src/Limelight.h>
 }
 
@@ -14,7 +13,6 @@ extern "C" {
 #include <chrono>
 #include <cmath>
 #include <functional>
-#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -22,23 +20,20 @@ extern "C" {
 #include <thread>
 #include <unordered_map>
 
-// lib includes
-#include <boost/endian/buffers.hpp>
-
 // platform includes
 #ifdef SUNSHINE_BUILD_X11
-  #include <X11/XKBlib.h>
   #include <X11/keysym.h>
+  #include <X11/XKBlib.h>
 #endif
 
 // local includes
 #include "config.h"
 #include "globals.h"
 #include "input.h"
-#include "raw_hid_tablet.h"
 #include "logging.h"
 #include "platform/common.h"
 #include "platform/virtualhid_input.h"
+#include "raw_hid_tablet.h"
 #include "thread_pool.h"
 #include "utility.h"
 
@@ -144,30 +139,6 @@ namespace input {
     return kpid & 0xFF;
   }
 
-  /**
-   * @brief Convert a little-endian netfloat to a native endianness float.
-   * @param f Little-endian network float bytes.
-   * @return Floating-point value decoded for the host CPU.
-   */
-  float from_netfloat(netfloat f) {
-    return boost::endian::endian_load<float, sizeof(float), boost::endian::order::little>(f);
-  }
-
-  void to_netfloat(float value, netfloat output) {
-    boost::endian::endian_store<float, sizeof(float), boost::endian::order::little>(output, value);
-  }
-
-  /**
-   * @brief Convert a little-endian netfloat to a native float and clamp it to a range.
-   * @param f Little-endian network float bytes.
-   * @param min The minimium value for clamping.
-   * @param max The maximum value for clamping.
-   * @return Decoded floating-point value clamped between min and max.
-   */
-  float from_clamped_netfloat(netfloat f, float min, float max) {
-    return std::clamp(from_netfloat(f), min, max);
-  }
-
   static task_pool_util::TaskPool::task_id_t key_press_repeat_id {};
   // Native delivery no longer runs on task_pool. Serialize delivery, timers,
   // lease changes and cleanup explicitly; a generation check alone is not a
@@ -177,6 +148,7 @@ namespace input {
   static std::array<std::uint8_t, 5> mouse_press {};
 
   static platf::input_t platf_input;
+
   /**
    * @brief Input emulation settings loaded from configuration.
    */
@@ -224,9 +196,6 @@ namespace input {
     std::unique_ptr<raw_hid::tablet_t> raw_hid_tablet;  ///< Exact client tablet retained for this desktop worker.
     bool raw_hid_owns_tablet;  ///< Whether exact UHID endpoints suppress the normalized pen fallback.
     std::atomic<std::uint64_t> connection_id;  ///< Most recent stream lease bound to this retained state.
-
-    std::list<std::vector<uint8_t>> input_queue;  ///< Pending raw input packets waiting for processing.
-    std::mutex input_queue_lock;  ///< Input queue lock.
 
     input::touch_port_t touch_port;  ///< Touch coordinate bounds for the current stream.
 
@@ -360,172 +329,6 @@ namespace input {
   }
 
   /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PNV_REL_MOUSE_MOVE_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin relative mouse move packet--"sv << std::endl
-      << "deltaX ["sv << util::endian::big(packet->deltaX) << ']' << std::endl
-      << "deltaY ["sv << util::endian::big(packet->deltaY) << ']' << std::endl
-      << "--end relative mouse move packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PNV_ABS_MOUSE_MOVE_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin absolute mouse move packet--"sv << std::endl
-      << "x      ["sv << util::endian::big(packet->x) << ']' << std::endl
-      << "y      ["sv << util::endian::big(packet->y) << ']' << std::endl
-      << "width  ["sv << util::endian::big(packet->width) << ']' << std::endl
-      << "height ["sv << util::endian::big(packet->height) << ']' << std::endl
-      << "--end absolute mouse move packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PNV_MOUSE_BUTTON_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin mouse button packet--"sv << std::endl
-      << "action ["sv << util::hex(packet->header.magic).to_string_view() << ']' << std::endl
-      << "button ["sv << util::hex(packet->button).to_string_view() << ']' << std::endl
-      << "--end mouse button packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PNV_SCROLL_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin mouse scroll packet--"sv << std::endl
-      << "scrollAmt1 ["sv << util::endian::big(packet->scrollAmt1) << ']' << std::endl
-      << "--end mouse scroll packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PSS_HSCROLL_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin mouse hscroll packet--"sv << std::endl
-      << "scrollAmount ["sv << util::endian::big(packet->scrollAmount) << ']' << std::endl
-      << "--end mouse hscroll packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PNV_KEYBOARD_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin keyboard packet--"sv << std::endl
-      << "keyAction ["sv << util::hex(packet->header.magic).to_string_view() << ']' << std::endl
-      << "keyCode ["sv << util::hex(packet->keyCode).to_string_view() << ']' << std::endl
-      << "modifiers ["sv << util::hex(packet->modifiers).to_string_view() << ']' << std::endl
-      << "flags ["sv << util::hex(packet->flags).to_string_view() << ']' << std::endl
-      << "--end keyboard packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param packet Protocol packet being processed.
-   */
-  void print(PNV_UNICODE_PACKET packet) {
-    std::string text(packet->text, util::endian::big(packet->header.size) - sizeof(packet->header.magic));
-    BOOST_LOG(debug)
-      << "--begin unicode packet--"sv << std::endl
-      << "text ["sv << text << ']' << std::endl
-      << "--end unicode packet--"sv;
-  }
-
-  /**
-   * @brief Prints a pen packet.
-   * @param packet The pen packet.
-   */
-  void print(PSS_PEN_PACKET packet) {
-    BOOST_LOG(debug)
-      << "--begin pen packet--"sv << std::endl
-      << "eventType ["sv << util::hex(packet->eventType).to_string_view() << ']' << std::endl
-      << "toolType ["sv << util::hex(packet->toolType).to_string_view() << ']' << std::endl
-      << "penButtons ["sv << util::hex(packet->penButtons).to_string_view() << ']' << std::endl
-      << "x ["sv << from_netfloat(packet->x) << ']' << std::endl
-      << "y ["sv << from_netfloat(packet->y) << ']' << std::endl
-      << "pressureOrDistance ["sv << from_netfloat(packet->pressureOrDistance) << ']' << std::endl
-      << "contactAreaMajor ["sv << from_netfloat(packet->contactAreaMajor) << ']' << std::endl
-      << "contactAreaMinor ["sv << from_netfloat(packet->contactAreaMinor) << ']' << std::endl
-      << "rotation ["sv << (uint32_t) packet->rotation << ']' << std::endl
-      << "tilt ["sv << (uint32_t) packet->tilt << ']' << std::endl
-      << "--end pen packet--"sv;
-  }
-
-  /**
-   * @brief Write a debug log representation of the input packet.
-   */
-  void print(void *payload) {
-    auto header = (PNV_INPUT_HEADER) payload;
-
-    switch (util::endian::little(header->magic)) {
-      case MOUSE_MOVE_REL_MAGIC_GEN5:
-        print((PNV_REL_MOUSE_MOVE_PACKET) payload);
-        break;
-      case MOUSE_MOVE_ABS_MAGIC:
-        print((PNV_ABS_MOUSE_MOVE_PACKET) payload);
-        break;
-      case MOUSE_BUTTON_DOWN_EVENT_MAGIC_GEN5:
-      case MOUSE_BUTTON_UP_EVENT_MAGIC_GEN5:
-        print((PNV_MOUSE_BUTTON_PACKET) payload);
-        break;
-      case SCROLL_MAGIC_GEN5:
-        print((PNV_SCROLL_PACKET) payload);
-        break;
-      case SS_HSCROLL_MAGIC:
-        print((PSS_HSCROLL_PACKET) payload);
-        break;
-      case KEY_DOWN_EVENT_MAGIC:
-      case KEY_UP_EVENT_MAGIC:
-        print((PNV_KEYBOARD_PACKET) payload);
-        break;
-      case UTF8_TEXT_EVENT_MAGIC:
-        print((PNV_UNICODE_PACKET) payload);
-        break;
-      case SS_PEN_MAGIC:
-        print((PSS_PEN_PACKET) payload);
-        break;
-      case SS_RAW_HID_MAGIC:
-        BOOST_LOG(verbose) << "Raw HID tablet frame"sv;
-        break;
-    }
-  }
-
-  /**
-   * @brief Forward a client input packet directly to the platform backend.
-   *
-   * @param input Platform input backend that receives the event.
-   * @param packet Protocol packet being processed.
-   */
-  void passthrough(std::shared_ptr<input_t> &input, PNV_REL_MOUSE_MOVE_PACKET packet) {
-    if (!config::input.mouse) {
-      return;
-    }
-
-    platf::move_mouse(platf_input, util::endian::big(packet->deltaX), util::endian::big(packet->deltaY));
-  }
-
-  /**
    * @brief Converts client coordinates on the specified surface into screen coordinates.
    * @param input The input context.
    * @param val The cartesian coordinate pair to convert.
@@ -617,26 +420,23 @@ namespace input {
    * @brief Forward a client input packet directly to the platform backend.
    *
    * @param input Platform input backend that receives the event.
-   * @param packet Protocol packet being processed.
+   * @param x Horizontal client coordinate.
+   * @param y Vertical client coordinate.
+   * @param width Inclusive maximum horizontal client coordinate.
+   * @param height Inclusive maximum vertical client coordinate.
    */
-  void passthrough(std::shared_ptr<input_t> &input, PNV_ABS_MOUSE_MOVE_PACKET packet) {
+  void absolute_mouse(std::shared_ptr<input_t> &input, std::uint16_t x, std::uint16_t y, std::uint16_t width, std::uint16_t height) {
     if (!config::input.mouse) {
       return;
     }
 
-    float x = util::endian::big(packet->x);
-    float y = util::endian::big(packet->y);
-
     // Prevent divide by zero
     // Don't expect it to happen, but just in case
-    if (!packet->width || !packet->height) {
+    if (!width || !height) {
       BOOST_LOG(warning) << "PLANK Client passed invalid dimensions"sv;
 
       return;
     }
-
-    auto width = (float) util::endian::big(packet->width);
-    auto height = (float) util::endian::big(packet->height);
 
     auto tpcoords = client_to_touchport(input, {x, y}, {width, height});
     if (!tpcoords) {
@@ -668,16 +468,14 @@ namespace input {
   /**
    * @brief Called to pass a mouse button message to the platform backend.
    *
-   * @param input The input context pointer.
-   * @param packet The mouse button packet.
+   * @param button Native mouse button number.
+   * @param release True for a release transition.
    */
-  void passthrough(std::shared_ptr<input_t> &input, PNV_MOUSE_BUTTON_PACKET packet) {
+  void mouse_button(std::uint8_t button, bool release) {
     if (!config::input.mouse) {
       return;
     }
 
-    auto release = util::endian::little(packet->header.magic) == MOUSE_BUTTON_UP_EVENT_MAGIC_GEN5;
-    auto button = util::endian::big(packet->button);
     if (button > 0 && button < mouse_press.size()) {
       if (mouse_press[button] != release) {
         // button state is already what we want
@@ -830,15 +628,17 @@ namespace input {
    * @brief Forward a client input packet directly to the platform backend.
    *
    * @param input Platform input backend that receives the event.
-   * @param packet Protocol packet being processed.
+   * @param key_code Client virtual-key code.
+   * @param release True for a release transition.
+   * @param modifiers Active client modifier mask.
+   * @param flags Native keyboard flags.
    */
-  void passthrough(std::shared_ptr<input_t> &input, PNV_KEYBOARD_PACKET packet) {
+  void keyboard(std::shared_ptr<input_t> &input, std::uint16_t key_code, bool release, int modifiers, std::uint8_t flags) {
     if (!config::input.keyboard) {
       return;
     }
 
-    auto release = util::endian::little(packet->header.magic) == KEY_UP_EVENT_MAGIC;
-    auto keyCode = packet->keyCode & 0x00FF;
+    auto keyCode = key_code & 0x00FF;
 
     // Num Lock is an always-on PLANK invariant. Consume the client's
     // lock-key transition so differing local LED state cannot invert the host,
@@ -860,7 +660,6 @@ namespace input {
     }
 
     // Right-alt maps to meta, so it must not also register as ALT
-    int modifiers = packet->modifiers;
     if (config::input.key_rightalt_to_key_win && input->right_alt_pressed && !input->left_alt_pressed) {
       modifiers &= ~MODIFIER_ALT;
     }
@@ -880,7 +679,7 @@ namespace input {
       }
     }
 
-    auto &pressed = key_press[make_kpid(keyCode, packet->flags)];
+    auto &pressed = key_press[make_kpid(keyCode, flags)];
     if (!pressed) {
       if (!release) {
         // A new key has been pressed down, we need to check for key combo's
@@ -894,7 +693,7 @@ namespace input {
         }
 
         if (config::input.key_repeat_delay.count() > 0) {
-          key_press_repeat_id = task_pool.pushDelayed(repeat_key, config::input.key_repeat_delay, keyCode, packet->flags, synthetic_modifiers).task_id;
+          key_press_repeat_id = task_pool.pushDelayed(repeat_key, config::input.key_repeat_delay, keyCode, flags, synthetic_modifiers).task_id;
         }
       } else {
         // Already released
@@ -907,7 +706,7 @@ namespace input {
 
     pressed = !release;
 
-    send_key_and_modifiers(keyCode, release, packet->flags, synthetic_modifiers);
+    send_key_and_modifiers(keyCode, release, flags, synthetic_modifiers);
 
     update_shortcutFlags(&input->shortcutFlags, map_keycode(keyCode), release);
   }
@@ -915,17 +714,17 @@ namespace input {
   /**
    * @brief Called to pass a vertical scroll message the platform backend.
    * @param input The input context pointer.
-   * @param packet The scroll packet.
+   * @param amount Signed high-resolution scroll amount.
    */
-  void passthrough(std::shared_ptr<input_t> &input, PNV_SCROLL_PACKET packet) {
+  void vertical_scroll(std::shared_ptr<input_t> &input, std::int16_t amount) {
     if (!config::input.mouse) {
       return;
     }
 
     if (config::input.high_resolution_scrolling) {
-      platf::scroll(platf_input, util::endian::big(packet->scrollAmt1));
+      platf::scroll(platf_input, amount);
     } else {
-      input->accumulated_vscroll_delta += util::endian::big(packet->scrollAmt1);
+      input->accumulated_vscroll_delta += amount;
       auto full_ticks = input->accumulated_vscroll_delta / WHEEL_DELTA;
       if (full_ticks) {
         // Send any full ticks that have accumulated and store the rest
@@ -938,17 +737,17 @@ namespace input {
   /**
    * @brief Called to pass a horizontal scroll message the platform backend.
    * @param input The input context pointer.
-   * @param packet The scroll packet.
+   * @param amount Signed high-resolution scroll amount.
    */
-  void passthrough(std::shared_ptr<input_t> &input, PSS_HSCROLL_PACKET packet) {
+  void horizontal_scroll(std::shared_ptr<input_t> &input, std::int16_t amount) {
     if (!config::input.mouse) {
       return;
     }
 
     if (config::input.high_resolution_scrolling) {
-      platf::hscroll(platf_input, util::endian::big(packet->scrollAmount));
+      platf::hscroll(platf_input, amount);
     } else {
-      input->accumulated_hscroll_delta += util::endian::big(packet->scrollAmount);
+      input->accumulated_hscroll_delta += amount;
       auto full_ticks = input->accumulated_hscroll_delta / WHEEL_DELTA;
       if (full_ticks) {
         // Send any full ticks that have accumulated and store the rest
@@ -961,15 +760,14 @@ namespace input {
   /**
    * @brief Forward a client input packet directly to the platform backend.
    *
-   * @param packet Protocol packet being processed.
+   * @param text UTF-8 code points to inject.
    */
-  void passthrough(const NV_UNICODE_PACKET *packet) {
+  void unicode(std::string_view text) {
     if (!config::input.keyboard) {
       return;
     }
 
-    int size = util::endian::big(packet->header.size) - sizeof(packet->header.magic);
-    platf::unicode(platf_input, packet->text, size);
+    platf::unicode(platf_input, text.data(), static_cast<int>(text.size()));
   }
 
   /**
@@ -1010,20 +808,18 @@ namespace input {
   /**
    * @brief Normalize a pen packet into monitor-local coordinates.
    *
-   * @tparam Packet Pointer type for a Moonlight pen packet.
    * @param input Input context that supplies the current pointer viewport metadata.
    * @param packet Pen packet to normalize.
    * @return Normalized pointer data, or `std::nullopt` when input is disabled or dimensions are invalid.
    */
-  template<typename Packet>
-  std::optional<absolute_pointer_data_t> prepare_absolute_pointer_data(std::shared_ptr<input_t> &input, Packet packet) {
+  std::optional<absolute_pointer_data_t> prepare_absolute_pointer_data(std::shared_ptr<input_t> &input, const platf::pen_input_t &packet) {
     if (!config::input.mouse) {
       return std::nullopt;
     }
 
     auto coords = client_to_touchport(
       input,
-      {from_clamped_netfloat(packet->x, 0.0f, 1.0f) * 65535.f, from_clamped_netfloat(packet->y, 0.0f, 1.0f) * 65535.f},
+      {std::clamp(packet.x, 0.0f, 1.0f) * 65535.f, std::clamp(packet.y, 0.0f, 1.0f) * 65535.f},
       {65535.f, 65535.f}
     );
     if (!coords) {
@@ -1035,14 +831,14 @@ namespace input {
       return std::nullopt;
     }
 
-    auto rotation = util::endian::little(packet->rotation);
+    auto rotation = packet.rotation;
     if (rotation != LI_ROT_UNKNOWN) {
       rotation %= 360;
     }
 
     const auto contact_area = scale_client_contact_area(
-      {from_clamped_netfloat(packet->contactAreaMajor, 0.0f, 1.0f) * 65535.f,
-       from_clamped_netfloat(packet->contactAreaMinor, 0.0f, 1.0f) * 65535.f},
+      {std::clamp(packet.contactAreaMajor, 0.0f, 1.0f) * 65535.f,
+       std::clamp(packet.contactAreaMinor, 0.0f, 1.0f) * 65535.f},
       rotation,
       {touch_port->width / 65535.f, touch_port->height / 65535.f}
     );
@@ -1055,12 +851,12 @@ namespace input {
    * @param input The input context pointer.
    * @param packet The pen packet.
    */
-  void passthrough(std::shared_ptr<input_t> &input, PSS_PEN_PACKET packet) {
-    if (packet->eventType == LI_TOUCH_EVENT_CANCEL_ALL || packet->eventType == LI_TOUCH_EVENT_CANCEL ||
-        packet->eventType == LI_TOUCH_EVENT_HOVER_LEAVE) {
+  void normalized_pen(std::shared_ptr<input_t> &input, const platf::pen_input_t &packet) {
+    if (packet.eventType == LI_TOUCH_EVENT_CANCEL_ALL || packet.eventType == LI_TOUCH_EVENT_CANCEL ||
+        packet.eventType == LI_TOUCH_EVENT_HOVER_LEAVE) {
       // Releases must work even during a display transition without a viewport.
       platf::pen_input_t pen {};
-      pen.eventType = packet->eventType;
+      pen.eventType = packet.eventType;
       pen.toolType = LI_TOOL_TYPE_UNKNOWN;
       platf::pen_update(input->client_context.get(), {}, pen);
       return;
@@ -1071,14 +867,14 @@ namespace input {
     }
 
     platf::pen_input_t pen {
-      packet->eventType,
-      packet->toolType,
-      packet->penButtons,
-      packet->tilt,
+      packet.eventType,
+      packet.toolType,
+      packet.penButtons,
+      packet.tilt,
       pointer_data->rotation,
       pointer_data->coords.first,
       pointer_data->coords.second,
-      from_clamped_netfloat(packet->pressureOrDistance, 0.0f, 1.0f),
+      std::clamp(packet.pressureOrDistance, 0.0f, 1.0f),
       pointer_data->contact_area.first,
       pointer_data->contact_area.second,
     };
@@ -1086,387 +882,90 @@ namespace input {
     platf::pen_update(input->client_context.get(), pointer_data->touch_port, pen);
   }
 
-  /**
-   * @brief Enumerates supported batch result options.
-   */
-  enum class batch_result_e {
-    batched,  ///< This entry was batched with the source entry
-    not_batchable,  ///< Not eligible to batch but continue attempts to batch
-    terminate_batch,  ///< Stop trying to batch with this entry
-  };
-
-  /**
-   * @brief Batch two relative mouse messages.
-   * @param dest The original packet to batch into.
-   * @param src A later packet to attempt to batch.
-   * @return The status of the batching operation.
-   */
-  batch_result_e batch(PNV_REL_MOUSE_MOVE_PACKET dest, PNV_REL_MOUSE_MOVE_PACKET src) {
-    short deltaX;
-    short deltaY;
-
-    // Batching is safe as long as the result doesn't overflow a 16-bit integer
-    if (!__builtin_add_overflow(util::endian::big(dest->deltaX), util::endian::big(src->deltaX), &deltaX)) {
-      return batch_result_e::terminate_batch;
-    }
-    if (!__builtin_add_overflow(util::endian::big(dest->deltaY), util::endian::big(src->deltaY), &deltaY)) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Take the sum of deltas
-    dest->deltaX = util::endian::big(deltaX);
-    dest->deltaY = util::endian::big(deltaY);
-    return batch_result_e::batched;
-  }
-
-  /**
-   * @brief Batch two absolute mouse messages.
-   * @param dest The original packet to batch into.
-   * @param src A later packet to attempt to batch.
-   * @return The status of the batching operation.
-   */
-  batch_result_e batch(PNV_ABS_MOUSE_MOVE_PACKET dest, PNV_ABS_MOUSE_MOVE_PACKET src) {
-    // Batching must only happen if the reference width and height don't change
-    if (dest->width != src->width || dest->height != src->height) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Take the latest absolute position
-    *dest = *src;
-    return batch_result_e::batched;
-  }
-
-  /**
-   * @brief Batch two vertical scroll messages.
-   * @param dest The original packet to batch into.
-   * @param src A later packet to attempt to batch.
-   * @return The status of the batching operation.
-   */
-  batch_result_e batch(PNV_SCROLL_PACKET dest, PNV_SCROLL_PACKET src) {
-    short scrollAmt;
-
-    // Batching is safe as long as the result doesn't overflow a 16-bit integer
-    if (!__builtin_add_overflow(util::endian::big(dest->scrollAmt1), util::endian::big(src->scrollAmt1), &scrollAmt)) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Take the sum of delta
-    dest->scrollAmt1 = util::endian::big(scrollAmt);
-    dest->scrollAmt2 = util::endian::big(scrollAmt);
-    return batch_result_e::batched;
-  }
-
-  /**
-   * @brief Batch two horizontal scroll messages.
-   * @param dest The original packet to batch into.
-   * @param src A later packet to attempt to batch.
-   * @return The status of the batching operation.
-   */
-  batch_result_e batch(PSS_HSCROLL_PACKET dest, PSS_HSCROLL_PACKET src) {
-    short scrollAmt;
-
-    // Batching is safe as long as the result doesn't overflow a 16-bit integer
-    if (!__builtin_add_overflow(util::endian::big(dest->scrollAmount), util::endian::big(src->scrollAmount), &scrollAmt)) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Take the sum of delta
-    dest->scrollAmount = util::endian::big(scrollAmt);
-    return batch_result_e::batched;
-  }
-
-  /**
-   * @brief Batch two pen messages.
-   * @param dest The original packet to batch into.
-   * @param src A later packet to attempt to batch.
-   * @return The status of the batching operation.
-   */
-  batch_result_e batch(PSS_PEN_PACKET dest, PSS_PEN_PACKET src) {
-    // Only batch hover or move events
-    if (dest->eventType != LI_TOUCH_EVENT_MOVE && dest->eventType != LI_TOUCH_EVENT_HOVER) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Batched events must be the same type
-    if (dest->eventType != src->eventType) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Do not allow batching if the button state changes
-    if (dest->penButtons != src->penButtons) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Do not batch beyond tool changes
-    if (dest->toolType != src->toolType) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // Take the latest state
-    *dest = *src;
-    return batch_result_e::batched;
-  }
-
-  /**
-   * @brief Batch two input messages.
-   * @param dest The original packet to batch into.
-   * @param src A later packet to attempt to batch.
-   * @return The status of the batching operation.
-   */
-  batch_result_e batch(PNV_INPUT_HEADER dest, PNV_INPUT_HEADER src) {
-    // We can only batch if the packet types are the same
-    if (dest->magic != src->magic) {
-      return batch_result_e::terminate_batch;
-    }
-
-    // We can only batch certain message types
-    switch (util::endian::little(dest->magic)) {
-      case MOUSE_MOVE_REL_MAGIC_GEN5:
-        return batch((PNV_REL_MOUSE_MOVE_PACKET) dest, (PNV_REL_MOUSE_MOVE_PACKET) src);
-      case MOUSE_MOVE_ABS_MAGIC:
-        return batch((PNV_ABS_MOUSE_MOVE_PACKET) dest, (PNV_ABS_MOUSE_MOVE_PACKET) src);
-      case SCROLL_MAGIC_GEN5:
-        return batch((PNV_SCROLL_PACKET) dest, (PNV_SCROLL_PACKET) src);
-      case SS_HSCROLL_MAGIC:
-        return batch((PSS_HSCROLL_PACKET) dest, (PSS_HSCROLL_PACKET) src);
-      case SS_PEN_MAGIC:
-        return batch((PSS_PEN_PACKET) dest, (PSS_PEN_PACKET) src);
-      default:
-        // Not a batchable message type
-        return batch_result_e::terminate_batch;
-    }
-  }
-
-  /**
-   * @brief Called on a thread pool thread to process an input message.
-   * @param input The input context pointer.
-   */
-  void passthrough_next_message(std::shared_ptr<input_t> input) {
-    std::lock_guard state_lock {input_state_mutex};
-    // 'entry' backs the 'payload' pointer, so they must remain in scope together
-    std::vector<uint8_t> entry;
-    PNV_INPUT_HEADER payload;
-
-    // Lock the input queue while batching, but release it before sending
-    // the input to the OS. This avoids potentially lengthy lock contention
-    // in the control stream thread while input is being processed by the OS.
-    {
-      std::lock_guard<std::mutex> lg(input->input_queue_lock);
-
-      // If all entries have already been processed, nothing to do
-      if (input->input_queue.empty()) {
-        return;
-      }
-
-      // Pop off the first entry, which we will send
-      entry = input->input_queue.front();
-      payload = (PNV_INPUT_HEADER) entry.data();
-      input->input_queue.pop_front();
-
-      // Try to batch with remaining items on the queue
-      auto i = input->input_queue.begin();
-      while (i != input->input_queue.end()) {
-        auto batchable_entry = *i;
-        auto batchable_payload = (PNV_INPUT_HEADER) batchable_entry.data();
-
-        auto batch_result = batch(payload, batchable_payload);
-        if (batch_result == batch_result_e::terminate_batch) {
-          // Stop batching
-          break;
-        } else if (batch_result == batch_result_e::batched) {
-          // Erase this entry since it was batched
-          i = input->input_queue.erase(i);
-        } else {
-          // We couldn't batch this entry, but try to batch later entries.
-          i++;
-        }
-      }
-    }
-
-    // Print the final input packet
-    input::print((void *) payload);
-
-    // Send the batched input to the OS
-    switch (util::endian::little(payload->magic)) {
-      case MOUSE_MOVE_REL_MAGIC_GEN5:
-        passthrough(input, (PNV_REL_MOUSE_MOVE_PACKET) payload);
-        break;
-      case MOUSE_MOVE_ABS_MAGIC:
-        passthrough(input, (PNV_ABS_MOUSE_MOVE_PACKET) payload);
-        break;
-      case MOUSE_BUTTON_DOWN_EVENT_MAGIC_GEN5:
-      case MOUSE_BUTTON_UP_EVENT_MAGIC_GEN5:
-        passthrough(input, (PNV_MOUSE_BUTTON_PACKET) payload);
-        break;
-      case SCROLL_MAGIC_GEN5:
-        passthrough(input, (PNV_SCROLL_PACKET) payload);
-        break;
-      case SS_HSCROLL_MAGIC:
-        passthrough(input, (PSS_HSCROLL_PACKET) payload);
-        break;
-      case KEY_DOWN_EVENT_MAGIC:
-      case KEY_UP_EVENT_MAGIC:
-        passthrough(input, (PNV_KEYBOARD_PACKET) payload);
-        break;
-      case UTF8_TEXT_EVENT_MAGIC:
-        passthrough(static_cast<const NV_UNICODE_PACKET *>(static_cast<const void *>(payload)));
-        break;
-      case SS_PEN_MAGIC:
-        select_normalized_pen_backend(input);
-        passthrough(input, (PSS_PEN_PACKET) payload);
-        break;
-      case SS_RAW_HID_MAGIC: {
-        const auto packet_size = static_cast<std::size_t>(util::endian::big(payload->size)) + sizeof(payload->size);
-        if (packet_size >= sizeof(SS_RAW_HID_PACKET) - 1 && packet_size <= entry.size()) {
-          const auto *packet = reinterpret_cast<const SS_RAW_HID_PACKET *>(payload);
-          const auto frame_size = packet_size - (sizeof(SS_RAW_HID_PACKET) - 1);
-          std::vector<std::uint8_t> frame(packet->data, packet->data + frame_size);
-          if (!handle_raw_hid_frame(input, frame)) {
-            BOOST_LOG(warning) << "Rejected malformed raw HID tablet frame"sv;
-          }
-        }
-        break;
-      }
-    }
-  }
-
-  /**
-   * @brief Called on the control stream thread to queue an input message.
-   * @param input The input context pointer.
-   * @param input_data The input message.
-   */
-  void passthrough(std::shared_ptr<input_t> &input, std::vector<std::uint8_t> &&input_data) {
-    {
-      std::lock_guard<std::mutex> lg(input->input_queue_lock);
-      input->input_queue.push_back(std::move(input_data));
-    }
-    task_pool.push(passthrough_next_message, input);
-  }
-
 #ifdef PLANK_TRANSPORT
-  bool native(std::shared_ptr<input_t> &input, std::uint8_t type,
-              const std::uint8_t *payload, std::size_t payload_size) {
+  /**
+   * @brief Validate native payloads and inject decoded values under the input lease lock.
+   * @param input Retained session input state.
+   * @param type Native message type.
+   * @param payload Native network-order payload.
+   * @param payload_size Number of available payload bytes.
+   * @return False for a malformed or unsupported message.
+   */
+  bool native(std::shared_ptr<input_t> &input, std::uint8_t type, const std::uint8_t *payload, std::size_t payload_size) {
     std::lock_guard lock {input_state_mutex};
     if (!input || !payload || payload_size == 0) {
       return false;
     }
-
     switch (type) {
-      case PLANK_TRANSPORT_INPUT_ABSOLUTE_MOUSE: {
+      case PLANK_TRANSPORT_INPUT_ABSOLUTE_MOUSE:
         if (payload_size != PLANK_TRANSPORT_INPUT_ABSOLUTE_MOUSE_SIZE) {
           return false;
         }
-        NV_ABS_MOUSE_MOVE_PACKET packet {};
-        packet.header.magic = util::endian::little<std::uint32_t>(MOUSE_MOVE_ABS_MAGIC);
-        packet.x = util::endian::big(plank_transport_input_read_u16(payload));
-        packet.y = util::endian::big(plank_transport_input_read_u16(payload + 2));
-        packet.width = util::endian::big(plank_transport_input_read_u16(payload + 4));
-        packet.height = util::endian::big(plank_transport_input_read_u16(payload + 6));
-        passthrough(input, &packet);
+        absolute_mouse(input, plank_transport_input_read_u16(payload), plank_transport_input_read_u16(payload + 2), plank_transport_input_read_u16(payload + 4), plank_transport_input_read_u16(payload + 6));
         return true;
-      }
-      case PLANK_TRANSPORT_INPUT_MOUSE_BUTTON: {
+      case PLANK_TRANSPORT_INPUT_MOUSE_BUTTON:
         if (payload_size != PLANK_TRANSPORT_INPUT_MOUSE_BUTTON_SIZE ||
-            (payload[1] != PLANK_TRANSPORT_INPUT_ACTION_PRESS &&
-             payload[1] != PLANK_TRANSPORT_INPUT_ACTION_RELEASE)) {
+            payload[1] > PLANK_TRANSPORT_INPUT_ACTION_PRESS) {
           return false;
         }
-        NV_MOUSE_BUTTON_PACKET packet {};
-        packet.header.magic = util::endian::little<std::uint32_t>(
-          payload[1] == PLANK_TRANSPORT_INPUT_ACTION_PRESS ?
-            MOUSE_BUTTON_DOWN_EVENT_MAGIC_GEN5 : MOUSE_BUTTON_UP_EVENT_MAGIC_GEN5
-        );
-        packet.button = payload[0];
-        passthrough(input, &packet);
+        mouse_button(payload[0], payload[1] == PLANK_TRANSPORT_INPUT_ACTION_RELEASE);
         return true;
-      }
-      case PLANK_TRANSPORT_INPUT_VERTICAL_SCROLL: {
+      case PLANK_TRANSPORT_INPUT_VERTICAL_SCROLL:
+      case PLANK_TRANSPORT_INPUT_HORIZONTAL_SCROLL:
         if (payload_size != PLANK_TRANSPORT_INPUT_SCROLL_SIZE) {
           return false;
         }
-        NV_SCROLL_PACKET packet {};
-        packet.scrollAmt1 = util::endian::big(
-          static_cast<std::int16_t>(plank_transport_input_read_u16(payload))
-        );
-        passthrough(input, &packet);
-        return true;
-      }
-      case PLANK_TRANSPORT_INPUT_HORIZONTAL_SCROLL: {
-        if (payload_size != PLANK_TRANSPORT_INPUT_SCROLL_SIZE) {
-          return false;
+        if (type == PLANK_TRANSPORT_INPUT_VERTICAL_SCROLL) {
+          vertical_scroll(input, static_cast<std::int16_t>(plank_transport_input_read_u16(payload)));
+        } else {
+          horizontal_scroll(input, static_cast<std::int16_t>(plank_transport_input_read_u16(payload)));
         }
-        SS_HSCROLL_PACKET packet {};
-        packet.scrollAmount = util::endian::big(
-          static_cast<std::int16_t>(plank_transport_input_read_u16(payload))
-        );
-        passthrough(input, &packet);
         return true;
-      }
-      case PLANK_TRANSPORT_INPUT_KEYBOARD: {
+      case PLANK_TRANSPORT_INPUT_KEYBOARD:
         if (payload_size != PLANK_TRANSPORT_INPUT_KEYBOARD_SIZE ||
-            (payload[2] != PLANK_TRANSPORT_INPUT_ACTION_PRESS &&
-             payload[2] != PLANK_TRANSPORT_INPUT_ACTION_RELEASE)) {
+            payload[2] > PLANK_TRANSPORT_INPUT_ACTION_PRESS) {
           return false;
         }
-        NV_KEYBOARD_PACKET packet {};
-        packet.header.magic = util::endian::little<std::uint32_t>(
-          payload[2] == PLANK_TRANSPORT_INPUT_ACTION_PRESS ?
-            KEY_DOWN_EVENT_MAGIC : KEY_UP_EVENT_MAGIC
-        );
-        packet.keyCode = util::endian::little(
-          static_cast<std::int16_t>(plank_transport_input_read_u16(payload))
-        );
-        packet.modifiers = static_cast<char>(payload[3]);
-        packet.flags = static_cast<char>(payload[4]);
-        passthrough(input, &packet);
+        keyboard(input, plank_transport_input_read_u16(payload), payload[2] == PLANK_TRANSPORT_INPUT_ACTION_RELEASE, payload[3], payload[4]);
         return true;
-      }
-      case PLANK_TRANSPORT_INPUT_UTF8_TEXT: {
-        if (payload_size > UTF8_TEXT_EVENT_MAX_COUNT) {
+      case PLANK_TRANSPORT_INPUT_UTF8_TEXT:
+        if (payload_size > PLANK_TRANSPORT_INPUT_UTF8_TEXT_MAX_SIZE) {
           return false;
         }
-        std::vector<std::uint8_t> packet_storage(
-          sizeof(NV_INPUT_HEADER) + payload_size
-        );
-        auto *packet = reinterpret_cast<NV_UNICODE_PACKET *>(packet_storage.data());
-        packet->header.size = util::endian::big(
-          static_cast<std::uint32_t>(sizeof(packet->header.magic) + payload_size)
-        );
-        std::copy_n(payload, payload_size, packet->text);
-        passthrough(packet);
+        unicode({reinterpret_cast<const char *>(payload), payload_size});
         return true;
-      }
-      case PLANK_TRANSPORT_INPUT_PEN: {
-        if (payload_size != PLANK_TRANSPORT_INPUT_PEN_SIZE ||
-            payload[6] != 0 || payload[7] != 0 ||
-            plank_transport_input_read_u32(payload + 28) != 0) {
-          return false;
+      case PLANK_TRANSPORT_INPUT_PEN:
+        {
+          if (payload_size != PLANK_TRANSPORT_INPUT_PEN_SIZE || payload[6] || payload[7] ||
+              plank_transport_input_read_u32(payload + 28) != 0) {
+            return false;
+          }
+          platf::pen_input_t pen {
+            payload[0],
+            payload[1],
+            payload[2],
+            payload[3],
+            plank_transport_input_read_u16(payload + 4),
+            plank_transport_input_read_float(payload + 8),
+            plank_transport_input_read_float(payload + 12),
+            plank_transport_input_read_float(payload + 16),
+            plank_transport_input_read_float(payload + 20),
+            plank_transport_input_read_float(payload + 24),
+          };
+          if (!std::isfinite(pen.x) || !std::isfinite(pen.y) || !std::isfinite(pen.pressureOrDistance) ||
+              !std::isfinite(pen.contactAreaMajor) || !std::isfinite(pen.contactAreaMinor)) {
+            return false;
+          }
+          select_normalized_pen_backend(input);
+          normalized_pen(input, pen);
+          return true;
         }
-        SS_PEN_PACKET packet {};
-        packet.eventType = payload[0];
-        packet.toolType = payload[1];
-        packet.penButtons = payload[2];
-        packet.tilt = payload[3];
-        packet.rotation = util::endian::little(
-          plank_transport_input_read_u16(payload + 4)
-        );
-        to_netfloat(plank_transport_input_read_float(payload + 8), packet.x);
-        to_netfloat(plank_transport_input_read_float(payload + 12), packet.y);
-        to_netfloat(plank_transport_input_read_float(payload + 16), packet.pressureOrDistance);
-        to_netfloat(plank_transport_input_read_float(payload + 20), packet.contactAreaMajor);
-        to_netfloat(plank_transport_input_read_float(payload + 24), packet.contactAreaMinor);
-        select_normalized_pen_backend(input);
-        passthrough(input, &packet);
-        return true;
-      }
-      case PLANK_TRANSPORT_INPUT_RAW_HID_WACOM: {
+      case PLANK_TRANSPORT_INPUT_RAW_HID_WACOM:
         if (payload_size < sizeof(PLANK_RAW_HID_WIRE_HEADER) ||
             payload_size > sizeof(PLANK_RAW_HID_WIRE_HEADER) + PLANK_RAW_HID_MAX_PAYLOAD_SIZE) {
           return false;
         }
-        std::vector<std::uint8_t> frame(payload, payload + payload_size);
-        return handle_raw_hid_frame(input, frame);
-      }
+        return handle_raw_hid_frame(input, {payload, payload + payload_size});
       default:
         return false;
     }
@@ -1659,11 +1158,8 @@ namespace input {
       if (!input) {
         return;
       }
-      NV_KEYBOARD_PACKET packet {};
-      packet.header.magic = util::endian::little<std::uint32_t>(release ? KEY_UP_EVENT_MAGIC : KEY_DOWN_EVENT_MAGIC);
-      packet.keyCode = static_cast<short>(key_code);
       auto mutable_input = input;
-      passthrough(mutable_input, &packet);
+      keyboard(mutable_input, key_code, release, 0, 0);
     }
 
     void handle_mouse_button(const std::shared_ptr<input_t> &input, const std::uint8_t button, const bool release) {
@@ -1671,13 +1167,7 @@ namespace input {
       if (!input) {
         return;
       }
-      NV_MOUSE_BUTTON_PACKET packet {};
-      packet.header.magic = util::endian::little<std::uint32_t>(
-        release ? MOUSE_BUTTON_UP_EVENT_MAGIC_GEN5 : MOUSE_BUTTON_DOWN_EVENT_MAGIC_GEN5
-      );
-      packet.button = button;
-      auto mutable_input = input;
-      passthrough(mutable_input, &packet);
+      mouse_button(button, release);
     }
 
     std::uint16_t last_keyboard_code() {

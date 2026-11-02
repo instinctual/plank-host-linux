@@ -37,10 +37,9 @@ When lizardbyte-common's Python dependencies change, refresh the **Host's**
 `uv.lock`, not only the dependency's lockfile. Python 3.14+ is required:
 
 ```sh
-git submodule update --init third-party/glad
 uv lock --python 3.14
 uv lock --check --python 3.14
-uv sync --locked --group glad --python 3.14
+uv sync --locked --python 3.14
 ```
 
 The update to `f9d91e1d29b7473f58e43acde4579da4e56c4abe` requires

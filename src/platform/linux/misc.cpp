@@ -53,7 +53,6 @@
 #endif
 
 // local includes
-#include "graphics.h"
 #include "misc.h"
 #include "src/config.h"
 #include "src/entry_handler.h"
@@ -1004,9 +1003,6 @@ namespace platf {
 #ifdef SUNSHINE_BUILD_CUDA
       NVFBC,  ///< NvFBC
 #endif
-#ifdef SUNSHINE_BUILD_DRM
-      KMS,  ///< KMS
-#endif
 #ifdef SUNSHINE_BUILD_X11
       X11,  ///< X11
 #endif
@@ -1039,15 +1035,6 @@ namespace platf {
   }
 #endif
 
-#ifdef SUNSHINE_BUILD_DRM
-  std::vector<std::string> kms_display_names(mem_type_e hwdevice_type);
-  std::shared_ptr<display_t> kms_display(mem_type_e hwdevice_type, const std::string &display_name, const video::config_t &config);
-
-  bool verify_kms() {
-    return !kms_display_names(mem_type_e::unknown).empty();
-  }
-#endif
-
 #ifdef SUNSHINE_BUILD_X11
   std::vector<std::string> x11_display_names();
   std::vector<display_info_t> x11_display_infos();
@@ -1066,11 +1053,6 @@ namespace platf {
     // display using NvFBC only supports mem_type_e::cuda
     if (sources[source::NVFBC] && hwdevice_type == mem_type_e::cuda) {
       return nvfbc_display_names();
-    }
-#endif
-#ifdef SUNSHINE_BUILD_DRM
-    if (sources[source::KMS]) {
-      return kms_display_names(hwdevice_type);
     }
 #endif
 #ifdef SUNSHINE_BUILD_X11
@@ -1142,26 +1124,6 @@ namespace platf {
       return nullptr;
     }
 
-    // Keep KMS as first element to check before dropping CAP_SYS_ADMIN
-#ifdef SUNSHINE_BUILD_DRM
-    if (sources[source::KMS]) {
-      BOOST_LOG(info) << "Screencasting with KMS"sv;
-      return kms_display(hwdevice_type, display_name, config);
-    }
-#endif
-
-    // KMS capture was passed; drop CAP_SYS_ADMIN only.
-    if (has_elevated_privileges(false)) {
-      drop_elevated_privileges(false);
-    }
-
-#ifdef SUNSHINE_BUILD_CUDA
-    if (sources[source::NVFBC] && hwdevice_type == mem_type_e::cuda) {
-      BOOST_LOG(info) << "Screencasting with NvFBC"sv;
-      return nvfbc_display(hwdevice_type, display_name, config);
-    }
-#endif
-
     return nullptr;
   }
 
@@ -1169,9 +1131,6 @@ namespace platf {
    * @brief Initialize the Linux high-precision timer file descriptor.
    */
   std::unique_ptr<deinit_t> init() {
-    // These are allowed to fail.
-    gbm::init();
-
     window_system = window_system_e::NONE;
 #if defined(SUNSHINE_BUILD_X11) || defined(SUNSHINE_BUILD_CUDA)
     if (std::string v; lizardbyte::common::get_env("DISPLAY", v)) {
@@ -1190,11 +1149,6 @@ namespace platf {
       sources[source::NVFBC] = true;
     }
 #endif
-#ifdef SUNSHINE_BUILD_DRM
-    if (sources.none() && verify_kms()) {
-      sources[source::KMS] = true;
-    }
-#endif
 #ifdef SUNSHINE_BUILD_X11
     // Native X11/XShm is an independent per-bookmark source and may also be
     // needed as a software-encoder fallback. Always discover it on X11.
@@ -1205,11 +1159,6 @@ namespace platf {
 
     if (sources.none()) {
       BOOST_LOG(error) << "Unable to initialize capture method"sv;
-      return nullptr;
-    }
-
-    if (!gladLoaderLoadEGL(NULL)) {
-      BOOST_LOG(error) << "Failed to load EGL library symbols"sv;
       return nullptr;
     }
 

@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-
 #include <sys/types.h>
 
 namespace session_stream {
@@ -26,7 +25,6 @@ namespace session_stream {
     int surround_info;  ///< Encoded GameStream surround-sound capability flags.
     std::string surround_params;  ///< Client-provided surround-sound layout parameters.
     bool continuous_audio;  ///< Whether audio packets continue during silence.
-    bool enable_hdr;  ///< Whether HDR streaming is requested.
     std::string output_id;  ///< Opaque PLANK output selected by the client.
     std::string output_name;  ///< Capture backend name resolved from output_id.
     std::string display_mode;  ///< PLANK presentation mode negotiated at launch.

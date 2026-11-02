@@ -24,12 +24,6 @@ namespace input {
   struct input_t;
 
   /**
-   * @brief Write a debug log representation of the input packet.
-   *
-   * @param input Raw input packet to format for logging.
-   */
-  void print(void *input);
-  /**
    * @brief Reset stream input state after a client disconnect or shutdown.
    *
    * @param input Shared stream input state to reset.
@@ -37,19 +31,13 @@ namespace input {
    */
   void reset(std::shared_ptr<input_t> &input, std::uint64_t connection_id);
 
-  /**
-   * @brief Queue a raw input message for platform passthrough.
-   */
-  void passthrough(std::shared_ptr<input_t> &input, std::vector<std::uint8_t> &&input_data);
-
 #ifdef PLANK_TRANSPORT
   /**
    * @brief Validate and inject one native KyProto input message.
    *
    * @return true when the typed PLANK message was accepted.
    */
-  bool native(std::shared_ptr<input_t> &input, std::uint8_t type,
-              const std::uint8_t *payload, std::size_t payload_size);
+  bool native(std::shared_ptr<input_t> &input, std::uint8_t type, const std::uint8_t *payload, std::size_t payload_size);
 #endif
 
   /**

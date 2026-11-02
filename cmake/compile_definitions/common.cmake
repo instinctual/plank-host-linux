@@ -98,7 +98,6 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/auth/web_auth.h"
         "${CMAKE_SOURCE_DIR}/src/session/session_context.cpp"
         "${CMAKE_SOURCE_DIR}/src/session/session_context.h"
-        "${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c/src/Input.h"
         "${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c/src/Limelight.h"
         "${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c/src/plank.h"
         "${CMAKE_SOURCE_DIR}/src/cbs.cpp"

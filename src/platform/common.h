@@ -13,8 +13,8 @@
 #include <string>
 
 // lib includes
+#include <boost/asio.hpp>
 #include <boost/core/noncopyable.hpp>
-  #include <boost/asio.hpp>
 
 // local includes
 #include "src/config.h"
@@ -32,7 +32,6 @@ using namespace std::literals;
 struct sockaddr;
 struct AVFrame;
 struct AVBufferRef;
-struct AVHWFramesContext;
 struct AVCodecContext;
 struct AVDictionary;
 
@@ -45,181 +44,6 @@ namespace nvenc {
 }
 
 namespace platf {
-  // Limited by bits in activeGamepadMask
-  constexpr auto MAX_GAMEPADS = 16;  ///< Maximum number of simultaneously tracked gamepads.
-
-  constexpr std::uint32_t DPAD_UP = 0x0001;  ///< Moonlight gamepad button mask bit for D-pad up.
-  constexpr std::uint32_t DPAD_DOWN = 0x0002;  ///< Moonlight gamepad button mask bit for D-pad down.
-  constexpr std::uint32_t DPAD_LEFT = 0x0004;  ///< Moonlight gamepad button mask bit for D-pad left.
-  constexpr std::uint32_t DPAD_RIGHT = 0x0008;  ///< Moonlight gamepad button mask bit for D-pad right.
-  constexpr std::uint32_t START = 0x0010;  ///< Moonlight gamepad button mask bit for Start.
-  constexpr std::uint32_t BACK = 0x0020;  ///< Moonlight gamepad button mask bit for Back.
-  constexpr std::uint32_t LEFT_STICK = 0x0040;  ///< Moonlight gamepad button mask bit for left stick press.
-  constexpr std::uint32_t RIGHT_STICK = 0x0080;  ///< Moonlight gamepad button mask bit for right stick press.
-  constexpr std::uint32_t LEFT_BUTTON = 0x0100;  ///< Moonlight gamepad button mask bit for left shoulder.
-  constexpr std::uint32_t RIGHT_BUTTON = 0x0200;  ///< Moonlight gamepad button mask bit for right shoulder.
-  constexpr std::uint32_t HOME = 0x0400;  ///< Moonlight gamepad button mask bit for Home.
-  constexpr std::uint32_t A = 0x1000;  ///< Moonlight gamepad button mask bit for A.
-  constexpr std::uint32_t B = 0x2000;  ///< Moonlight gamepad button mask bit for B.
-  constexpr std::uint32_t X = 0x4000;  ///< Moonlight gamepad button mask bit for X.
-  constexpr std::uint32_t Y = 0x8000;  ///< Moonlight gamepad button mask bit for Y.
-  constexpr std::uint32_t PADDLE1 = 0x010000;  ///< Moonlight gamepad button mask bit for paddle 1.
-  constexpr std::uint32_t PADDLE2 = 0x020000;  ///< Moonlight gamepad button mask bit for paddle 2.
-  constexpr std::uint32_t PADDLE3 = 0x040000;  ///< Moonlight gamepad button mask bit for paddle 3.
-  constexpr std::uint32_t PADDLE4 = 0x080000;  ///< Moonlight gamepad button mask bit for paddle 4.
-  constexpr std::uint32_t TOUCHPAD_BUTTON = 0x100000;  ///< Moonlight gamepad button mask bit for touchpad click.
-  constexpr std::uint32_t MISC_BUTTON = 0x200000;  ///< Moonlight gamepad button mask bit for the miscellaneous button.
-
-  /**
-   * @brief Gamepad type exposed to clients and why it may be disabled.
-   */
-  struct supported_gamepad_t {
-    std::string name;  ///< Human-readable name for this item.
-    bool is_enabled;  ///< Whether this gamepad type is currently available.
-    std::string reason_disabled;  ///< Human-readable reason the gamepad type is disabled.
-  };
-
-  /**
-   * @brief Enumerates supported gamepad feedback options.
-   */
-  enum class gamepad_feedback_e {
-    rumble,  ///< Rumble
-    rumble_triggers,  ///< Rumble triggers
-    set_motion_event_state,  ///< Set motion event state
-    set_rgb_led,  ///< Set RGB LED
-    set_adaptive_triggers,  ///< Set adaptive triggers
-  };
-
-  /**
-   * @brief Feedback command sent from Sunshine to a virtual gamepad.
-   */
-  struct gamepad_feedback_msg_t {
-    /**
-     * @brief Create a rumble object or message.
-     *
-     * @param id Identifier for the controller, session, display, or resource.
-     * @param lowfreq Low-frequency rumble motor intensity.
-     * @param highfreq High-frequency rumble motor intensity.
-     * @return Constructed rumble object.
-     */
-    static gamepad_feedback_msg_t make_rumble(std::uint16_t id, std::uint16_t lowfreq, std::uint16_t highfreq) {
-      gamepad_feedback_msg_t msg;
-      msg.type = gamepad_feedback_e::rumble;
-      msg.id = id;
-      msg.data.rumble = {lowfreq, highfreq};
-      return msg;
-    }
-
-    /**
-     * @brief Create rumble triggers.
-     *
-     * @param id Identifier for the controller, session, display, or resource.
-     * @param left Left trigger or motor payload for the feedback command.
-     * @param right Right trigger or motor payload for the feedback command.
-     * @return Constructed rumble triggers object.
-     */
-    static gamepad_feedback_msg_t make_rumble_triggers(std::uint16_t id, std::uint16_t left, std::uint16_t right) {
-      gamepad_feedback_msg_t msg;
-      msg.type = gamepad_feedback_e::rumble_triggers;
-      msg.id = id;
-      msg.data.rumble_triggers = {left, right};
-      return msg;
-    }
-
-    /**
-     * @brief Motion-event feedback command payload for a controller.
-     *
-     * @param id Identifier for the controller, session, display, or resource.
-     * @param motion_type Motion type.
-     * @param report_rate Report rate.
-     * @return Constructed motion event state object.
-     */
-    static gamepad_feedback_msg_t make_motion_event_state(std::uint16_t id, std::uint8_t motion_type, std::uint16_t report_rate) {
-      gamepad_feedback_msg_t msg;
-      msg.type = gamepad_feedback_e::set_motion_event_state;
-      msg.id = id;
-      msg.data.motion_event_state.motion_type = motion_type;
-      msg.data.motion_event_state.report_rate = report_rate;
-      return msg;
-    }
-
-    /**
-     * @brief Create RGB led.
-     *
-     * @param id Identifier for the controller, session, display, or resource.
-     * @param r Red color channel value.
-     * @param g Green color channel value.
-     * @param b Blue color channel value.
-     * @return Constructed RGB led object.
-     */
-    static gamepad_feedback_msg_t make_rgb_led(std::uint16_t id, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-      gamepad_feedback_msg_t msg;
-      msg.type = gamepad_feedback_e::set_rgb_led;
-      msg.id = id;
-      msg.data.rgb_led = {r, g, b};
-      return msg;
-    }
-
-    /**
-     * @brief Create adaptive triggers.
-     *
-     * @param id Identifier for the controller, session, display, or resource.
-     * @param event_flags Event flags.
-     * @param type_left Type left.
-     * @param type_right Type right.
-     * @param left Left trigger or motor payload for the feedback command.
-     * @param right Right trigger or motor payload for the feedback command.
-     * @return Constructed adaptive triggers object.
-     */
-    static gamepad_feedback_msg_t make_adaptive_triggers(std::uint16_t id, uint8_t event_flags, uint8_t type_left, uint8_t type_right, const std::array<uint8_t, 10> &left, const std::array<uint8_t, 10> &right) {
-      gamepad_feedback_msg_t msg;
-      msg.type = gamepad_feedback_e::set_adaptive_triggers;
-      msg.id = id;
-      msg.data.adaptive_triggers = {.event_flags = event_flags, .type_left = type_left, .type_right = type_right, .left = left, .right = right};
-      return msg;
-    }
-
-    gamepad_feedback_e type;  ///< Feedback command type stored in the union payload.
-    std::uint16_t id;  ///< Controller identifier associated with this message.
-
-    union {
-      struct {
-        std::uint16_t lowfreq;
-        std::uint16_t highfreq;
-      } rumble;
-
-      struct {
-        std::uint16_t left_trigger;
-        std::uint16_t right_trigger;
-      } rumble_triggers;
-
-      struct {
-        std::uint16_t report_rate;
-        std::uint8_t motion_type;
-      } motion_event_state;
-
-      struct {
-        std::uint8_t r;
-        std::uint8_t g;
-        std::uint8_t b;
-      } rgb_led;
-
-      struct {
-        uint16_t controllerNumber;
-        uint8_t event_flags;
-        uint8_t type_left;
-        uint8_t type_right;
-        std::array<uint8_t, 10> left;
-        std::array<uint8_t, 10> right;
-      } adaptive_triggers;
-    } data;  ///< Controller feedback payload for the selected feedback type.
-  };
-
-  /**
-   * @brief Queue used to deliver controller feedback commands to the platform backend.
-   */
-  using feedback_queue_t = safe::mail_raw_t::queue_t<gamepad_feedback_msg_t>;
-
   namespace speaker {
     /**
      * @brief Enumerates supported speaker options.
@@ -350,10 +174,7 @@ namespace platf {
      * @brief Capability bit indicating native pen and touch support.
      */
     constexpr caps_t pen_touch = 0x01;  // Pen and touch events
-    /**
-     * @brief Capability bit indicating controller touchpad support.
-     */
-    constexpr caps_t controller_touch = 0x02;  // Controller touch events
+    // Capability bit 0x02 is reserved (retired controller touch).
     /**
      * @brief Capability bit indicating encrypted raw HID tablet redirection.
      */
@@ -366,90 +187,6 @@ namespace platf {
     constexpr caps_t raw_hid_focus_suspend = 0x20;  // Preserve raw HID endpoints across client focus changes
     constexpr caps_t local_cursor = 0x40;  // Exact host cursor shapes rendered by the client compositor
   };  // namespace platform_caps
-
-  /**
-   * @brief Button and axis state received for a virtual gamepad.
-   */
-  struct gamepad_state_t {
-    std::uint32_t buttonFlags;  ///< Moonlight button mask for the current gamepad state.
-    std::uint8_t lt;  ///< Left trigger value.
-    std::uint8_t rt;  ///< Right trigger value.
-    std::int16_t lsX;  ///< Left stick X-axis value.
-    std::int16_t lsY;  ///< Left stick Y-axis value.
-    std::int16_t rsX;  ///< Right stick X-axis value.
-    std::int16_t rsY;  ///< Right stick Y-axis value.
-  };
-
-  /**
-   * @brief Global and client-relative identifiers for a virtual gamepad.
-   */
-  struct gamepad_id_t {
-    // The global index is used when looking up gamepads in the platform's
-    // gamepad array. It identifies gamepads uniquely among all clients.
-    int globalIndex;  ///< Index unique across all connected clients.
-
-    // The client-relative index is the controller number as reported by the
-    // client. It must be used when communicating back to the client via
-    // the input feedback queue.
-    std::uint8_t clientRelativeIndex;  ///< Client relative index.
-  };
-
-  /**
-   * @brief Capabilities reported when a controller is connected.
-   */
-  struct gamepad_arrival_t {
-    std::uint8_t type;  ///< Protocol or controller type discriminator.
-    std::uint16_t capabilities;  ///< Capability flags advertised by the controller.
-    std::uint32_t supportedButtons;  ///< Button mask supported by the connected controller.
-  };
-
-  /**
-   * @brief Touchpad contact data reported by a controller.
-   */
-  struct gamepad_touch_t {
-    gamepad_id_t id;  ///< Gamepad identifier for the event.
-    std::uint8_t eventType;  ///< Moonlight event type for the input packet.
-    std::uint32_t pointerId;  ///< Client-provided pointer identifier for a touch contact.
-    float x;  ///< Horizontal coordinate or vector component.
-    float y;  ///< Vertical coordinate or vector component.
-    float pressure;  ///< Contact pressure reported by the client.
-  };
-
-  /**
-   * @brief Accelerometer or gyroscope sample from a controller.
-   */
-  struct gamepad_motion_t {
-    gamepad_id_t id;  ///< Gamepad identifier for the event.
-    std::uint8_t motionType;  ///< Motion type.
-
-    // Accel: m/s^2
-    // Gyro: deg/s
-    float x;  ///< Horizontal coordinate or vector component.
-    float y;  ///< Vertical coordinate or vector component.
-    float z;  ///< Depth or Z-axis vector component.
-  };
-
-  /**
-   * @brief Battery state reported by a virtual gamepad.
-   */
-  struct gamepad_battery_t {
-    gamepad_id_t id;  ///< Gamepad identifier for the event.
-    std::uint8_t state;  ///< Battery state reported by the client.
-    std::uint8_t percentage;  ///< Battery charge percentage.
-  };
-
-  // Retained cross-platform ABI type. PLANK's production input
-  // dispatcher does not accept touchscreen packets.
-  struct touch_input_t {
-    std::uint8_t eventType;
-    std::uint16_t rotation;
-    std::uint32_t pointerId;
-    float x;
-    float y;
-    float pressureOrDistance;
-    float contactAreaMajor;
-    float contactAreaMinor;
-  };
 
   /**
    * @brief Pen tablet event data from the client.
@@ -546,7 +283,6 @@ namespace platf {
    * @brief AVCodec-backed encode device and frame state.
    */
   struct avcodec_encode_device_t: encode_device_t {
-    void *data {};  ///< Backend-specific conversion state.
     AVFrame *frame {};  ///< FFmpeg frame currently owned by the encode device.
 
     /**
@@ -570,41 +306,9 @@ namespace platf {
      * @note Implementations must take ownership of 'frame'.
      *
      * @param frame Video or graphics frame being processed.
-     * @param hw_frames_ctx FFmpeg hardware frames context associated with the frame.
      * @return Status from updating frame.
      */
-    virtual int set_frame(AVFrame *frame, AVBufferRef *hw_frames_ctx) {
-      BOOST_LOG(error) << "Illegal call to hwdevice_t::set_frame(). Did you forget to override it?";
-      return -1;
-    };
-
-    /**
-     * @brief Initialize the hwframes context.
-     * @note Implementations may set parameters during initialization of the hwframes context.
-     *
-     * @param frames FFmpeg hardware frames context to initialize.
-     */
-    virtual void init_hwframes(AVHWFramesContext *frames) {};
-
-    /**
-     * @brief Provides a hook for allow platform-specific code to adjust codec options.
-     * @note Implementations may set or modify codec options prior to codec initialization.
-     *
-     * @param ctx Native context object used by the operation or callback.
-     * @param options Request options or socket options to apply.
-     */
-    virtual void init_codec_options(AVCodecContext *ctx, AVDictionary **options) {};
-
-    /**
-     * @brief Prepare to derive a context.
-     * @note Implementations may make modifications required before context derivation
-     *
-     * @param hw_device_type FFmpeg hardware device type requested for context derivation.
-     * @return 0 when context derivation may continue; nonzero to abort.
-     */
-    virtual int prepare_to_derive_context(int hw_device_type) {
-      return 0;
-    };
+    virtual int set_frame(AVFrame *frame) = 0;
   };
 
   /**
@@ -689,16 +393,6 @@ namespace platf {
     virtual int dummy_img(img_t *img) = 0;
 
     /**
-     * @brief Create AVCodec encode device.
-     *
-     * @param pix_fmt Sunshine pixel format to convert or allocate for.
-     * @return Constructed AVCodec encode device object.
-     */
-    virtual std::unique_ptr<avcodec_encode_device_t> make_avcodec_encode_device(pix_fmt_e pix_fmt) {
-      return nullptr;
-    }
-
-    /**
      * @brief Create a CUDA-capture to software-AVCodec encode device.
      *
      * @param pix_fmt Sunshine pixel format to read back for the CPU encoder.
@@ -716,26 +410,6 @@ namespace platf {
      */
     virtual std::unique_ptr<nvenc_encode_device_t> make_nvenc_encode_device(pix_fmt_e pix_fmt) {
       return nullptr;
-    }
-
-    /**
-     * @brief Report whether the active display mode is HDR.
-     *
-     * @return True when the active display mode is HDR.
-     */
-    virtual bool is_hdr() {
-      return false;
-    }
-
-    /**
-     * @brief Read HDR metadata for the active display mode.
-     *
-     * @param metadata Output structure populated with HDR metadata.
-     * @return True when HDR metadata was written to `metadata`.
-     */
-    virtual bool get_hdr_metadata(SS_HDR_METADATA &metadata) {
-      std::memset(&metadata, 0, sizeof(metadata));
-      return false;
     }
 
     /**
@@ -1151,7 +825,6 @@ namespace platf {
    * @param flags Bit flags that modify the requested operation.
    */
   void keyboard_update(input_t &input, uint16_t modcode, bool release, uint8_t flags);
-  void gamepad_update(input_t &input, int nr, const gamepad_state_t &gamepad_state);
   /**
    * @brief Submit UTF-8 text input to the keyboard backend.
    *
@@ -1189,10 +862,6 @@ namespace platf {
    */
   bool normalized_pen_enabled(client_input_t *input);
 
-  // Retained for dormant upstream platform backends. The PLANK Linux
-  // build has no touchscreen device or packet route.
-  void touch_update(client_input_t *input, const touch_port_t &touch_port, const touch_input_t &touch);
-
   /**
    * @brief Send a pen event to the OS.
    * @param input The client-specific input context.
@@ -1200,53 +869,6 @@ namespace platf {
    * @param pen The pen event.
    */
   void pen_update(client_input_t *input, const touch_port_t &touch_port, const pen_input_t &pen);
-
-  /**
-   * @brief Send a gamepad touch event to the OS.
-   * @param input The global input context.
-   * @param touch The touch event.
-   */
-  void gamepad_touch(input_t &input, const gamepad_touch_t &touch);
-
-  /**
-   * @brief Send a gamepad motion event to the OS.
-   * @param input The global input context.
-   * @param motion The motion event.
-   */
-  void gamepad_motion(input_t &input, const gamepad_motion_t &motion);
-
-  /**
-   * @brief Send a gamepad battery event to the OS.
-   * @param input The global input context.
-   * @param battery The battery event.
-   */
-  void gamepad_battery(input_t &input, const gamepad_battery_t &battery);
-
-  /**
-   * @brief Create a new virtual gamepad.
-   * @param input The global input context.
-   * @param id The gamepad ID.
-   * @param metadata Controller metadata from client (empty if none provided).
-   * @param feedback_queue The queue for posting messages back to the client.
-   * @return 0 on success.
-   */
-  int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue);
-  /**
-   * @brief Rebind an existing virtual gamepad to a resumed client session.
-   *
-   * @param input Platform input backend that owns the virtual gamepad.
-   * @param id Global and client-relative identifiers for the resumed controller.
-   * @param feedback_queue Queue used to return gamepad feedback to the resumed client.
-   * @return 0 when the gamepad exists and was rebound; otherwise -1.
-   */
-  int rebind_gamepad(input_t &input, const gamepad_id_t &id, feedback_queue_t feedback_queue);
-  /**
-   * @brief Release gamepad resources.
-   *
-   * @param input Platform input backend that receives the event.
-   * @param nr Controller index assigned by the client.
-   */
-  void free_gamepad(input_t &input, int nr);
 
   /**
    * @brief Get the supported platform capabilities to advertise to the client.
@@ -1282,14 +904,6 @@ namespace platf {
    * @return Resolved render device path (may be empty on non-Linux platforms).
    */
   std::string resolve_render_device();
-
-  /**
-   * @brief Gets the supported gamepads for this platform backend.
-   * @details This may be called prior to `platf::input()`!
-   * @param input Pointer to the platform's `input_t` or `nullptr`.
-   * @return Vector of gamepad options and status.
-   */
-  std::vector<supported_gamepad_t> &supported_gamepads(input_t *input);
 
   /**
    * @brief Platform timer object used for precise frame pacing.

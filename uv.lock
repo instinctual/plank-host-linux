@@ -85,20 +85,6 @@ wheels = [
 ]
 
 [[package]]
-name = "glad2"
-source = { directory = "third-party/glad" }
-dependencies = [
-    { name = "jinja2" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "glad2-fortran", marker = "extra == 'fortran'" },
-    { name = "jinja2", specifier = ">=2.7,<4.0" },
-]
-provides-extras = ["fortran"]
-
-[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -269,13 +255,5 @@ dependencies = [
     { name = "lizardbyte-common", extra = ["c"] },
 ]
 
-[package.dev-dependencies]
-glad = [
-    { name = "glad2" },
-]
-
 [package.metadata]
 requires-dist = [{ name = "lizardbyte-common", extras = ["c"], directory = "third-party/lizardbyte-common" }]
-
-[package.metadata.requires-dev]
-glad = [{ name = "glad2", directory = "third-party/glad" }]
