@@ -41,11 +41,6 @@
   #include <AMF/components/VideoEncoderVCE.h>
 #endif
 
-#if (defined(linux) || defined(__FreeBSD__)) && !defined(DOXYGEN)
-  // For VAAPI rate control types
-  #include <va/va.h>
-#endif
-
 namespace fs = std::filesystem;
 using namespace std::literals;
 
