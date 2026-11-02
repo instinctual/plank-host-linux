@@ -67,28 +67,12 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
-# modify SUNSHINE_DEFINITIONS
-list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_SHADERS_DIR="${CMAKE_SOURCE_DIR}/src_assets/linux/assets/shaders/opengl")
-
 set(TEST_DEFINITIONS)  # list will be appended as needed
 
 # this indicates we're building tests in case sunshine needs to adjust some code or add private tests
 list(APPEND TEST_DEFINITIONS SUNSHINE_TESTS)
 list(APPEND TEST_DEFINITIONS SUNSHINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 list(APPEND TEST_DEFINITIONS SUNSHINE_TEST_BIN_DIR="${CMAKE_CURRENT_BINARY_DIR}")
-
-# Override SUNSHINE_ASSETS_DIR to use a writable temp directory for tests
-# Remove the existing definition from SUNSHINE_DEFINITIONS to avoid redefinition error
-list(FILTER SUNSHINE_DEFINITIONS EXCLUDE REGEX "^SUNSHINE_ASSETS_DIR=")
-list(APPEND TEST_DEFINITIONS SUNSHINE_ASSETS_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_assets")
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    find_package(Udev 255)  # we need 255+ for udevadm verify
-    message(STATUS "UDEV_FOUND: ${UDEV_FOUND}")
-    if(UDEV_FOUND)
-        list(APPEND TEST_DEFINITIONS UDEVADM_EXECUTABLE="${UDEVADM_EXECUTABLE}")
-    endif()
-endif()
 
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_SOURCE_DIR}/tests/*.h
@@ -110,7 +94,6 @@ add_executable(${PROJECT_NAME}
 set(INTEGRATION_TEST_FILES
     "src/config.cpp"
     "docs/configuration.md"
-    "src_assets/linux/misc/60-sunshine.rules"
 )
 
 foreach(file ${INTEGRATION_TEST_FILES})

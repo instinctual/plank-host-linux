@@ -36,13 +36,7 @@ if(BUILD_WERROR)
     list(APPEND SUNSHINE_COMPILE_OPTIONS -Werror)
 endif()
 
-# setup assets directory
-if(NOT SUNSHINE_ASSETS_DIR)
-    set(SUNSHINE_ASSETS_DIR "assets")
-endif()
-
 # platform specific compile definitions
-include(${CMAKE_MODULE_PATH}/compile_definitions/unix.cmake)
 include(${CMAKE_MODULE_PATH}/compile_definitions/linux.cmake)
 
 # libvirtualhid
@@ -152,11 +146,6 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/stat_trackers.h"
         "${CMAKE_SOURCE_DIR}/src/stat_trackers.cpp"
         ${PLATFORM_TARGET_FILES})
-
-if(NOT SUNSHINE_ASSETS_DIR_DEF)
-    set(SUNSHINE_ASSETS_DIR_DEF "${SUNSHINE_ASSETS_DIR}")
-endif()
-list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_ASSETS_DIR="${SUNSHINE_ASSETS_DIR_DEF}")
 
 # Publisher metadata
 list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_PUBLISHER_NAME="${SUNSHINE_PUBLISHER_NAME}")

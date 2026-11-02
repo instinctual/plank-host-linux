@@ -55,9 +55,6 @@ include(${CMAKE_MODULE_PATH}/prep/options.cmake)
 # initial prep
 include(${CMAKE_MODULE_PATH}/prep/init.cmake)
 
-# project constants
-include(${CMAKE_MODULE_PATH}/prep/constants.cmake)
-
 # load macros
 include(${CMAKE_MODULE_PATH}/macros/common.cmake)
 
@@ -70,7 +67,5 @@ include(${CMAKE_MODULE_PATH}/compile_definitions/common.cmake)
 # target definitions
 include(${CMAKE_MODULE_PATH}/targets/common.cmake)
 
-# The product package consumes only runtime assets from this CMake build. Its
-# RPM metadata and filesystem manifest live at the PLANK repository
-# root, not in the inherited CPack layer.
-include(${CMAKE_MODULE_PATH}/packaging/plank.cmake)
+# RPM metadata, display EDIDs and the filesystem manifest are owned by the
+# PLANK parent repository. This executable has no external shader/UI assets.
