@@ -43,8 +43,12 @@ namespace cuda {
         if (previous > limit - size) return nullptr;
       } while (!used.compare_exchange_weak(previous, previous + size, std::memory_order_relaxed));
       owner->size_ = size;
+      CUcontext retained_context = nullptr;
       if (api.device_get(&owner->device_, 0) != CUDA_SUCCESS ||
-          api.retain(&owner->context_, owner->device_) != CUDA_SUCCESS) return nullptr;
+          api.retain(&retained_context, owner->device_) != CUDA_SUCCESS) return nullptr;
+      // Failed driver calls need not preserve output parameters. Only adopt a
+      // successfully retained context, so rollback cannot release another owner.
+      owner->context_ = retained_context;
       if (api.push(owner->context_) != CUDA_SUCCESS) return nullptr;
       constexpr unsigned portable = 1;  // CU_MEMHOSTREGISTER_PORTABLE
       const auto registered = api.register_memory(data, size, portable);

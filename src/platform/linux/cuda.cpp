@@ -1011,7 +1011,9 @@ namespace cuda {
       elapsed_time = reinterpret_cast<elapsed_time_fn *>(dlsym(timing_driver, "cuEventElapsedTime"));
       if (!elapsed_time) return;
       for (auto &event : timing_events) {
-        if (cdf->cuEventCreate(&event, 0) != CUDA_SUCCESS) return;
+        CUevent created = nullptr;
+        if (cdf->cuEventCreate(&created, 0) != CUDA_SUCCESS) return;
+        event = created;
       }
       timing_ready = true;
     }

@@ -8,9 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <utility>
-#if defined(__SSE2__)
-  #include <emmintrin.h>
-#endif
 
 namespace platf::x11 {
   /** @brief Partition rows without overlap, including heights smaller than the worker count. */
@@ -30,28 +27,13 @@ namespace platf::x11 {
    * @param red Nonoverlapping plane 2, with at least pixel_count elements.
    * @param pixel_count Row width; SIMD alignment and padding are not required.
    */
-  inline void unpack_xrgb10_to_gbr10_row(const std::uint32_t *source,
-      std::uint16_t *green, std::uint16_t *blue, std::uint16_t *red,
+  inline void unpack_xrgb10_to_gbr10_row(const std::uint32_t *__restrict source,
+      std::uint16_t *__restrict green, std::uint16_t *__restrict blue,
+      std::uint16_t *__restrict red,
       std::size_t pixel_count) {
-    std::size_t x = 0;
-#if defined(__SSE2__)
-    // SSE2 is part of the x86-64 baseline. Mask before signed packing, so all
-    // ten bits survive; alpha/padding bits never enter a component plane.
-    const auto mask = _mm_set1_epi32(1023);
-    for (; pixel_count - x >= 8; x += 8) {
-      const auto a = _mm_loadu_si128(reinterpret_cast<const __m128i *>(source + x));
-      const auto b = _mm_loadu_si128(reinterpret_cast<const __m128i *>(source + x + 4));
-      _mm_storeu_si128(reinterpret_cast<__m128i *>(red + x),
-        _mm_packs_epi32(_mm_and_si128(a, mask), _mm_and_si128(b, mask)));
-      _mm_storeu_si128(reinterpret_cast<__m128i *>(green + x),
-        _mm_packs_epi32(_mm_and_si128(_mm_srli_epi32(a, 10), mask),
-                       _mm_and_si128(_mm_srli_epi32(b, 10), mask)));
-      _mm_storeu_si128(reinterpret_cast<__m128i *>(blue + x),
-        _mm_packs_epi32(_mm_and_si128(_mm_srli_epi32(a, 20), mask),
-                       _mm_and_si128(_mm_srli_epi32(b, 20), mask)));
-    }
-#endif
-    for (; x < pixel_count; ++x) {
+    // Nonoverlapping planes let the compiler vectorize this exact integer loop
+    // without runtime alias checks or architecture-specific dispatch.
+    for (std::size_t x = 0; x < pixel_count; ++x) {
       const auto pixel = source[x];
       red[x] = static_cast<std::uint16_t>(pixel & 0x3ffU);
       green[x] = static_cast<std::uint16_t>((pixel >> 10U) & 0x3ffU);
