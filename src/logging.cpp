@@ -351,8 +351,5 @@ namespace logging {
     return "["s + input + "]"s;
   }
 
-  std::wstring bracket(const std::wstring &input) {
-    return L"["s + input + L"]"s;
-  }
 
 }  // namespace logging

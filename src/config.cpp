@@ -133,22 +133,7 @@ namespace config {
   /**
    * @brief Default input configuration values used before file and CLI overrides.
    */
-  input_t input {
-    {
-      {0x10, 0xA0},
-      {0x11, 0xA2},
-      {0x12, 0xA4},
-    },
-    500ms,  // key_repeat_delay
-    std::chrono::duration<double> {1 / 24.9},  // key_repeat_period
-
-
-    true,  // keyboard enabled
-    false,  // map Right Alt to the Windows key
-    true,  // mouse enabled
-    true,  // always send scancodes
-    true,  // high resolution scrolling
-  };
+  input_t input = default_input_config();
 
   /**
    * @brief Default top-level Sunshine configuration values used before file and CLI overrides.

@@ -113,6 +113,28 @@ namespace config {
     bool high_resolution_scrolling;  ///< Enable high-resolution mouse-wheel events.
   };
 
+  /**
+   * @brief Construct product input defaults before administrator overrides.
+   * @return Default input settings shared by the Host and component tests.
+   */
+  inline input_t default_input_config() {
+    return {
+      {
+        {0x10, 0xA0},
+        {0x11, 0xA2},
+        {0x12, 0xA4},
+      },
+      std::chrono::milliseconds {500},  // key_repeat_delay
+      std::chrono::duration<double> {1 / 24.9},  // key_repeat_period
+
+      true,  // keyboard enabled
+      false,  // map Right Alt to the Windows key
+      true,  // mouse enabled
+      true,  // always send scancodes
+      true,  // high resolution scrolling
+    };
+  }
+
   namespace flag {
     /**
      * @brief Enumerates supported flag options.
