@@ -1182,7 +1182,7 @@ namespace nvhttp {
   }
 
   /**
-   * @brief Build the GameStream server-info response.
+   * @brief Build the PLANK discovery and authenticated server-info response.
    *
    * @param response HTTP response object to populate.
    * @param request HTTP request data from the client.
@@ -1214,6 +1214,9 @@ namespace nvhttp {
     tree.put("root.PlankWorkerInstance", worker_instance_id());
     tree.put("root.PlankTopologyVersion", plank_topology_version);
     tree.put("root.PlankFeatureFlags", plank_topology_features);
+    // Public UI hint only; authenticated topology still enforces allowed layouts.
+    tree.put("root.PlankDisplayPolicyVersion", 1);
+    tree.put("root.PlankDisplayPolicy", config::sunshine.startup_layout);
     tree.put("root.PlankCaptureSources", "nvfbc,x11-native10");
     tree.put("root.PlankEncoderBackends", "software-cuda,nvenc-direct");
     tree.put("root.PlankEncodingModes", get_plank_encoding_modes());
