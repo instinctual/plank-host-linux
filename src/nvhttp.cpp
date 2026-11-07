@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #ifdef PLANK_TRANSPORT
+  #include "plank_metrics.h"
   #include "plank_transport.h"
   #include "plank_transport_control.h"
 
@@ -190,6 +191,18 @@ namespace nvhttp {
     PlankTransportNativeEndpoint *endpoint = nullptr;
     int result = plank_transport_native_endpoint_create(&endpoint_config, &endpoint);
     if (result == PLANK_TRANSPORT_OK) {
+      if (config::metrics.enabled) {
+        PlankMetricsConfig metrics {};
+        metrics.struct_size = sizeof(metrics);
+        metrics.port = config::metrics.port;
+        metrics.interval_seconds = config::metrics.interval_seconds;
+        metrics.workstation_id = http::unique_id.c_str();
+        metrics.slot_id = "host";
+        metrics.version = PROJECT_VERSION;
+        if (plank_transport_native_metrics_configure(endpoint, &metrics, nullptr) != PLANK_TRANSPORT_OK) {
+          BOOST_LOG(warning) << "PLANK metrics unavailable; continuing the session";
+        }
+      }
       result = plank_transport_native_endpoint_start(endpoint);
     }
     if (result != PLANK_TRANSPORT_OK) {

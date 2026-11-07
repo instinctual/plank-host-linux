@@ -40,6 +40,26 @@ manually configured hostname/IP bookmarks continue to work while disabled.
 Milliseconds allowed for initial media-channel pings and established-client
 inactivity before the host cleans up the stream. Default: `10000`.
 
+## Metrics
+
+### metrics_enabled
+
+Send application statistics to a local Telegraf UDP listener. Accepted values:
+`true` or `false`; default `false`. No database credentials or remote connections
+are owned by PLANK. Invalid optional metrics values disable collection without
+preventing streaming. Restart the Host after changing these settings.
+
+### metrics_port
+
+IPv4 loopback UDP destination, range `1024`–`65535`, default `28991`. Match the
+Telegraf `inputs.socket_listener` port and use `data_format = "influx"`.
+
+### metrics_interval_seconds
+
+Sample interval, `1`–`60` whole seconds, default `1`. Local delivery is best effort;
+Telegraf owns buffering and database delivery. Metrics do not include media or
+input contents. An absent/busy collector never blocks the session.
+
 ## Security and state
 
 ### allow_root_login

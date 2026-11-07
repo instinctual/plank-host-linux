@@ -75,6 +75,15 @@ namespace config {
   };
 
   /**
+   * @brief Optional localhost application metrics; Telegraf owns remote delivery.
+   */
+  struct metrics_t {
+    bool enabled = false;  ///< Disabled unless the administrator opts in.
+    int port = 28991;  ///< IPv4 loopback UDP receiver, in the unprivileged port range.
+    int interval_seconds = 1;  ///< Export interval, 1 through 60 seconds.
+  };
+
+  /**
    * @brief Network stream settings shared by audio, video, and control channels.
    */
   struct stream_t {
@@ -171,6 +180,7 @@ namespace config {
 
   extern video_t video;
   extern audio_t audio;
+  extern metrics_t metrics;
   extern stream_t stream;
   extern nvhttp_t nvhttp;
   extern input_t input;

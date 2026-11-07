@@ -7,6 +7,7 @@ extern "C" {
 #include <moonlight-common-c/src/Limelight.h>
 #include <plank_transport.h>
 #include <plank_transport_setup.h>
+#include <plank_metrics.h>
 }
 
 // standard includes
@@ -420,6 +421,15 @@ namespace session_stream {
       result.message = "Failed to start native streaming session";
       return result;
     }
+
+    PlankMetricsStreamInfo metrics_info {};
+    metrics_info.struct_size = sizeof(metrics_info);
+    metrics_info.width = config.monitor.width;
+    metrics_info.height = config.monitor.height;
+    metrics_info.requested_fps = config.monitor.framerate;
+    metrics_info.capture_source = launch_session->capture_source.c_str();
+    metrics_info.encoding_profile = launch_session->encoding_mode.c_str();
+    plank_transport_native_metrics_stream_info(plank_transport_endpoint, &metrics_info);
 
     result.status = PLANK_TRANSPORT_SETUP_STATUS_OK;
     const auto host_feature_flags =

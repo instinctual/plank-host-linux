@@ -37,6 +37,8 @@ const std::string CERTIFICATE_FILE = std::string(CA_DIR) + "/cacert.pem";  ///< 
 
 namespace config {
 
+  metrics_t metrics;
+
   namespace nv {
 
     /**
@@ -818,6 +820,30 @@ namespace config {
     path_f(vars, "cert", nvhttp.cert);
     string_f(vars, "host_name", nvhttp.host_name);
     bool_f(vars, "publish_session_user", nvhttp.publish_session_user);
+    std::string metrics_flag = metrics.enabled ? "true" : "false";
+    string_f(vars, "metrics_enabled", metrics_flag);
+    bool metrics_valid = metrics_flag == "true" || metrics_flag == "false";
+    metrics.enabled = metrics_flag == "true";
+    for (const auto *key : {"metrics_port", "metrics_interval_seconds"}) {
+      if (const auto value = vars.find(key); value != vars.end()) {
+        metrics_valid &= !value->second.empty() && value->second.size() <= 5 &&
+                         value->second.find_first_not_of("0123456789") == std::string::npos;
+      }
+    }
+    try {
+      int_f(vars, "metrics_port", metrics.port);
+      int_f(vars, "metrics_interval_seconds", metrics.interval_seconds);
+    } catch (const std::exception &) {
+      vars.erase("metrics_port");
+      vars.erase("metrics_interval_seconds");
+      metrics_valid = false;
+    }
+    if (!metrics_valid || metrics.port < 1024 || metrics.port > 65535 ||
+        metrics.interval_seconds < 1 || metrics.interval_seconds > 60) {
+      BOOST_LOG(warning) << "PLANK metrics disabled: invalid local port or interval";
+      metrics.enabled = false;
+    }
+
     path_f(vars, "log_path", config::sunshine.log_file);
     path_f(vars, "file_state", nvhttp.file_state);
 
