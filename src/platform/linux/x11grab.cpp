@@ -494,6 +494,9 @@ namespace platf {
         {(dyn::apiproc *) &request_check, "xcb_request_check"},
         {(dyn::apiproc *) &flush, "xcb_flush"},
         {(dyn::apiproc *) &capture_api.geometry, "xcb_get_geometry"},
+        {(dyn::apiproc *) &capture_api.watch, "xcb_change_window_attributes_checked"},
+        {(dyn::apiproc *) &capture_api.check, "xcb_request_check"},
+        {(dyn::apiproc *) &capture_api.poll, "xcb_poll_for_event"},
         {(dyn::apiproc *) &capture_api.geometry_reply, "xcb_get_geometry_reply"},
       };
 
@@ -1007,6 +1010,10 @@ namespace platf {
         xserver_uid,
         xserver_gid
       );
+      if (!capture_geometry.subscribe(xcb::capture_api, raw_connection, static_cast<xcb_window_t>(xwindow), static_cast<xcb_window_t>(overlay_window))) {
+        BOOST_LOG(error) << "Could not subscribe native X11 capture geometry"sv;
+        return -1;
+      }
       pin_upload = config.encoder_backend == "nvenc-direct";
       const auto *shm_extension = xcb::get_extension_data(
         connection->connection.get(),
@@ -1068,6 +1075,8 @@ namespace platf {
       }
     }
 
+    x11::capture_geometry_t capture_geometry;  ///< Event-backed root/overlay geometry validity.
+
     capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out) {
       if (!pull_free_image_cb(img_out)) {
         return capture_e::interrupted;
@@ -1082,7 +1091,7 @@ namespace platf {
       x11::capture_batch_result_t result;
       {
         std::lock_guard lock {connection->mutex};
-        result = x11::capture_batch(xcb::capture_api, connection->connection.get(), static_cast<xcb_window_t>(xwindow), static_cast<xcb_drawable_t>(overlay_window), offset_x, offset_y, width, height, env_width, env_height, img->segment);
+        result = capture_geometry.snapshot(xcb::capture_api, connection->connection.get(), static_cast<xcb_window_t>(xwindow), static_cast<xcb_drawable_t>(overlay_window), offset_x, offset_y, width, height, env_width, env_height, img->segment);
       }
       if (!result.valid) {
         BOOST_LOG(warning) << "Native X11 capture geometry, depth or SHM reply changed; requesting reinitialization"sv;

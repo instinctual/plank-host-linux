@@ -50,6 +50,9 @@ namespace nvhttp {
     SunshineHTTPSServer(const std::string &certification_file, const std::string &private_key_file, bool tls13_only):
         ServerBase<SunshineHTTPS>::ServerBase(443),
         context(boost::asio::ssl::context::tls_server) {
+      // Apply the bound in the HTTP reader, before buffering headers or bodies.
+      config.max_request_streambuf_size = 64U * 1024U;
+      config.timeout_content = 10;
       // Disabling TLS 1.0 and 1.1 (see RFC 8996)
       context.set_options(boost::asio::ssl::context::no_tlsv1);
       context.set_options(boost::asio::ssl::context::no_tlsv1_1);
@@ -98,6 +101,16 @@ namespace nvhttp {
 
         if (ec != SimpleWeb::error::operation_aborted) {
           this->accept();
+        }
+
+        if (!ec) {
+          std::lock_guard lock {connections->mutex};
+          // Includes the next pending accept. Bound memory before TLS or auth
+          // admission, including peers that send only a partial request.
+          if (connections->set.size() > 33) {
+            connection->close();
+            return;
+          }
         }
 
         auto session = std::make_shared<Session>(config.max_request_streambuf_size, connection);

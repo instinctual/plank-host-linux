@@ -34,6 +34,7 @@ using namespace std::literals;
 constexpr auto CA_DIR = "credentials";  ///< Subdirectory under app data that stores Sunshine credentials.
 const std::string PRIVATE_KEY_FILE = std::string(CA_DIR) + "/cakey.pem";  ///< Relative path to the persisted private key PEM file.
 const std::string CERTIFICATE_FILE = std::string(CA_DIR) + "/cacert.pem";  ///< Relative path to the persisted certificate PEM file.
+
 namespace config {
 
   namespace nv {
@@ -141,18 +142,10 @@ namespace config {
   sunshine_t sunshine {
     2,  // min_log_level
     0,  // flags
-#ifdef PLANK_PRODUCT_BUILD
     "/etc/plank/host.conf",  // config file
-#else
-    platf::appdata().string() + "/sunshine.conf",  // config file
-#endif
     {},  // cmd args
     28989,  // Base port number
-#ifdef PLANK_PRODUCT_BUILD
     "/var/log/plank/host.log",  // log file
-#else
-    platf::appdata().string() + "/sunshine.log",  // log file
-#endif
     false,  // PLANK mDNS advertisement
     "physical",  // PLANK startup display policy
   };
@@ -423,9 +416,6 @@ namespace config {
    * @param input Destination field updated when the setting exists and parses successfully.
    */
   void path_f(std::unordered_map<std::string, std::string> &vars, const std::string &name, fs::path &input) {
-    // appdata needs to be retrieved once only
-    static auto appdata = platf::appdata();
-
     std::string temp;
     string_f(vars, name, temp);
 
@@ -434,7 +424,7 @@ namespace config {
     }
 
     if (input.is_relative()) {
-      input = appdata / input;
+      input = fs::absolute(sunshine.config_file).parent_path() / input;
     }
 
     auto dir = input;
@@ -821,7 +811,6 @@ namespace config {
     bool_f(vars, "nvenc_h264_cavlc", video.nv.h264_cavlc);
     generic_f(vars, "nvenc_split_encode", video.nv.split_frame_encoding, nv::split_encode_from_view);
 
-
     string_f(vars, "adapter_name", video.adapter_name);
     double_between_f(vars, "minimum_fps_target", video.minimum_fps_target, {0.0, 1000.0});
 
@@ -913,8 +902,7 @@ namespace config {
       if (line == "--help"sv) {
         logging::print_help(*argv);
         return 1;
-      }
-      else if (*line == '-') {
+      } else if (*line == '-') {
         if (*(line + 1) == '-') {
           sunshine.cmd.name = line + 2;
           sunshine.cmd.argc = argc - x - 1;
@@ -953,16 +941,9 @@ namespace config {
 
     bool config_loaded = false;
     try {
-      // Create appdata folder if it does not exist
-      file_handler::make_directory(platf::appdata().string());
-
       // A packaged PLANK host has one administrator-owned configuration source.
       if (!fs::exists(sunshine.config_file)) {
-#ifdef PLANK_PRODUCT_BUILD
         throw std::runtime_error("PLANK host configuration does not exist: " + sunshine.config_file);
-#else
-        std::ofstream {sunshine.config_file};
-#endif
       }
 
       // Read config file
@@ -986,7 +967,6 @@ namespace config {
     if (!config_loaded) {
       return -1;
     }
-
 
     return 0;
   }

@@ -5,13 +5,13 @@
 // standard includes
 #include <bitset>
 #include <sstream>
-#include <thread>
 
 // lib includes
+#include "pulse_wait.h"
+
 #include <boost/regex.hpp>
 #include <pulse/error.h>
 #include <pulse/pulseaudio.h>
-#include <pulse/simple.h>
 
 // local includes
 #include "src/config.h"
@@ -65,70 +65,124 @@ namespace platf {
    * @brief PulseAudio recording stream and channel metadata.
    */
   struct mic_attr_t: public mic_t {
-    util::safe_ptr<pa_simple, pa_simple_free> mic;  ///< PulseAudio simple recording stream for microphone capture.
+    util::safe_ptr<pa_mainloop, pa_mainloop_free> loop {pa_mainloop_new()};  ///< Capture-owned event loop.
+    util::safe_ptr<pa_context, pa_context_unref> context;  ///< Capture connection.
+    util::safe_ptr<pa_stream, pa_stream_unref> stream;  ///< Asynchronous recording stream.
+    const void *chunk = nullptr;  ///< Borrowed until pa_stream_drop().
+    std::size_t chunk_size = 0, chunk_offset = 0;  ///< Unconsumed capture bytes.
+    std::vector<float> pending;  ///< One partial output block, retained across timeouts.
+    std::size_t filled = 0;  ///< Filled bytes in pending.
 
-    /**
-     * @brief Deliver a captured audio sample to Sunshine's audio pipeline.
-     *
-     * @param sample_buf Sample buf.
-     * @return Capture status reported to the streaming pipeline.
-     */
-    capture_e sample(std::vector<float> &sample_buf) override {
-      auto sample_size = sample_buf.size();
-
-      auto buf = sample_buf.data();
-      int status;
-      if (pa_simple_read(mic.get(), buf, sample_size * sizeof(float), &status)) {
-        BOOST_LOG(error) << "pa_simple_read() failed: "sv << pa_strerror(status);
-
-        return capture_e::error;
+    /** @brief Disconnect without waiting for an audio-server acknowledgement. */
+    ~mic_attr_t() override {
+      if (stream) {
+        pa_stream_disconnect(stream.get());
       }
+      stream.reset();
+      if (context) {
+        pa_context_disconnect(context.get());
+      }
+    }
 
+    /** @brief Capture one block with bounded waits and explicit shutdown cancellation.
+     * @param output Destination PCM block.
+     * @param stop Owner cancellation predicate.
+     * @return Capture outcome.
+     */
+    capture_e sample(std::vector<float> &output, const std::function<bool()> &stop) override {
+      if (pending.size() != output.size()) {
+        pending.resize(output.size());
+        filled = 0;
+      }
+      const auto total = pending.size() * sizeof(float);
+      const auto deadline = std::chrono::steady_clock::now() + 1s;
+      while (filled < total) {
+        if (stop()) {
+          return capture_e::interrupted;
+        }
+        if (chunk_offset == chunk_size) {
+          if (chunk_size && pa_stream_drop(stream.get()) < 0) {
+            return capture_e::reinit;
+          }
+          chunk_size = chunk_offset = 0;
+          if (!pulse::wait(loop.get(), context.get(), [&] {
+                return pa_stream_get_state(stream.get()) != PA_STREAM_READY || pa_stream_readable_size(stream.get()) > 0;
+              },
+                           stop,
+                           deadline)) {
+            if (stop()) {
+              return capture_e::interrupted;
+            }
+            return pa_context_get_state(context.get()) == PA_CONTEXT_READY ? capture_e::timeout : capture_e::reinit;
+          }
+          if (pa_stream_get_state(stream.get()) != PA_STREAM_READY ||
+              pa_stream_peek(stream.get(), &chunk, &chunk_size) < 0) {
+            return capture_e::reinit;
+          }
+          if (!chunk_size) {
+            continue;
+          }
+        }
+        const auto size = std::min(total - filled, chunk_size - chunk_offset);
+        auto *destination = reinterpret_cast<std::uint8_t *>(pending.data()) + filled;
+        if (chunk) {
+          std::memcpy(destination, static_cast<const std::uint8_t *>(chunk) + chunk_offset, size);
+        } else {
+          std::memset(destination, 0, size);  // PulseAudio holes represent silence.
+        }
+        chunk_offset += size;
+        filled += size;
+      }
+      output.swap(pending);
+      filled = 0;
       return capture_e::ok;
     }
   };
 
-  /**
-   * @brief Create a microphone capture stream for the requested layout.
-   *
-   * @param mapping Opus channel mapping table for the requested layout.
-   * @param channels Number of audio channels in the stream.
-   * @param sample_rate Audio sample rate in hertz.
-   * @param frame_size Number of samples captured per audio frame.
-   * @param source_name Source name.
-   * @return Microphone capture object for the requested audio layout.
+  /** @brief Open a bounded asynchronous recording connection.
+   * @param mapping Channel positions.
+   * @param channels Channel count.
+   * @param sample_rate Sample rate in Hz.
+   * @param frame_size Frames per capture block.
+   * @param source_name Monitor source to capture.
+   * @return Initialized capture or null on failure/deadline.
    */
   std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, std::uint32_t frame_size, std::string source_name) {
     auto mic = std::make_unique<mic_attr_t>();
-
-    pa_sample_spec ss {PA_SAMPLE_FLOAT32, sample_rate, (std::uint8_t) channels};
-    pa_channel_map pa_map;
-
-    pa_map.channels = channels;
-    std::for_each_n(pa_map.map, pa_map.channels, [mapping](auto &channel) mutable {
-      channel = position_mapping[*mapping++];
-    });
-
-    pa_buffer_attr pa_attr = {
-      .maxlength = uint32_t(-1),
-      .tlength = uint32_t(-1),
-      .prebuf = uint32_t(-1),
-      .minreq = uint32_t(-1),
-      .fragsize = uint32_t(frame_size * channels * sizeof(float))
-    };
-
-    int status;
-
-    mic->mic.reset(
-      pa_simple_new(nullptr, "sunshine", pa_stream_direction_t::PA_STREAM_RECORD, source_name.c_str(), "sunshine-record", &ss, &pa_map, &pa_attr, &status)
-    );
-
-    if (!mic->mic) {
-      auto err_str = pa_strerror(status);
-      BOOST_LOG(error) << "pa_simple_new() failed: "sv << err_str;
+    if (!mic->loop) {
       return nullptr;
     }
-
+    mic->context.reset(pa_context_new(pa_mainloop_get_api(mic->loop.get()), "PLANK Host"));
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    if (!mic->context || pa_context_connect(mic->context.get(), nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0 ||
+        !pulse::wait(mic->loop.get(), mic->context.get(), [&] {
+          return pa_context_get_state(mic->context.get()) == PA_CONTEXT_READY;
+        },
+                     [] {
+                       return false;
+                     },
+                     deadline)) {
+      return nullptr;
+    }
+    pa_sample_spec spec {PA_SAMPLE_FLOAT32, sample_rate, static_cast<std::uint8_t>(channels)};
+    pa_channel_map map {};
+    map.channels = channels;
+    for (int i = 0; i < channels; ++i) {
+      map.map[i] = position_mapping[mapping[i]];
+    }
+    pa_buffer_attr attr {uint32_t(-1), uint32_t(-1), uint32_t(-1), uint32_t(-1), frame_size * channels * uint32_t(sizeof(float))};
+    mic->stream.reset(pa_stream_new(mic->context.get(), "PLANK recording", &spec, &map));
+    if (!mic->stream || pa_stream_connect_record(mic->stream.get(), source_name.c_str(), &attr, PA_STREAM_ADJUST_LATENCY) < 0 ||
+        !pulse::wait(mic->loop.get(), mic->context.get(), [&] {
+          return pa_stream_get_state(mic->stream.get()) != PA_STREAM_CREATING;
+        },
+                     [] {
+                       return false;
+                     },
+                     deadline) ||
+        pa_stream_get_state(mic->stream.get()) != PA_STREAM_READY) {
+      return nullptr;
+    }
     return mic;
   }
 
@@ -253,18 +307,6 @@ namespace platf {
     }
 
     /**
-     * @brief Translate PulseAudio context state changes into server events.
-     *
-     * @param ctx Native context object used by the operation or callback.
-     * @param userdata Caller-provided pointer passed through the callback.
-     */
-    void ctx_state_cb(ctx_t::pointer ctx, void *userdata) {
-      auto &f = *(std::function<void(ctx_t::pointer)> *) userdata;
-
-      f(ctx);
-    }
-
-    /**
      * @brief Record completion of a PulseAudio asynchronous operation.
      *
      * @param ctx Native context object used by the operation or callback.
@@ -282,15 +324,9 @@ namespace platf {
      * @brief PulseAudio server controller that creates and removes Sunshine sinks.
      */
     class server_t: public audio_control_t {
-      enum ctx_event_e : int {
-        ready,
-        terminated,
-        failed
-      };
-
     public:
-      loop_t loop;  ///< PulseAudio threaded mainloop instance.
-      ctx_t ctx;  ///< PulseAudio threaded mainloop context.
+      loop_t loop;  ///< PulseAudio caller-owned mainloop instance.
+      ctx_t ctx;  ///< PulseAudio caller-owned mainloop context.
       std::string requested_sink;  ///< Requested sink.
 
       struct {
@@ -299,71 +335,52 @@ namespace platf {
         std::uint32_t surround71 = PA_INVALID_INDEX;
       } index;  ///< PulseAudio module indexes for Sunshine-created null sinks.
 
-      std::unique_ptr<safe::event_t<ctx_event_e>> events;  ///< Event queue receiving PulseAudio context state changes.
-      std::unique_ptr<std::function<void(ctx_t::pointer)>> events_cb;  ///< Callback that translates PulseAudio context updates into events.
+      std::recursive_mutex operation_mutex;  ///< Serialize all context API calls and callbacks.
+      std::chrono::steady_clock::time_point shutdown_deadline = std::chrono::steady_clock::time_point::max();  ///< Shared cleanup budget.
 
-      std::jthread worker;  ///< Thread running the PulseAudio mainloop.
-
-      /**
-       * @brief Initialize PulseAudio mainloop, context, and Sunshine null sinks.
-       *
-       * @return 0 on success; nonzero or negative platform status on failure.
-       */
+      /** @brief Initialize a context with a two-second deadline. @return Zero on success. */
       int init() {
-        events = std::make_unique<safe::event_t<ctx_event_e>>();
         loop.reset(pa_mainloop_new());
-        ctx.reset(pa_context_new(pa_mainloop_get_api(loop.get()), "sunshine"));
-
-        events_cb = std::make_unique<std::function<void(ctx_t::pointer)>>([this](ctx_t::pointer ctx) {
-          switch (pa_context_get_state(ctx)) {
-            case PA_CONTEXT_READY:
-              events->raise(ready);
-              break;
-            case PA_CONTEXT_TERMINATED:
-              BOOST_LOG(debug) << "PulseAudio context terminated"sv;
-              events->raise(terminated);
-              break;
-            case PA_CONTEXT_FAILED:
-              BOOST_LOG(debug) << "PulseAudio context failed"sv;
-              events->raise(failed);
-              break;
-            case PA_CONTEXT_CONNECTING:
-              BOOST_LOG(debug) << "Connecting to pulseaudio"sv;
-            case PA_CONTEXT_UNCONNECTED:
-            case PA_CONTEXT_AUTHORIZING:
-            case PA_CONTEXT_SETTING_NAME:
-              break;
-          }
-        });
-
-        pa_context_set_state_callback(ctx.get(), ctx_state_cb, events_cb.get());
-
-        auto status = pa_context_connect(ctx.get(), nullptr, PA_CONTEXT_NOFLAGS, nullptr);
-        if (status) {
-          BOOST_LOG(error) << "Couldn't connect to pulseaudio: "sv << pa_strerror(status);
+        if (!loop) {
           return -1;
         }
-
-        worker = std::jthread {
-          [](loop_t::pointer loop) {
-            int retval;
-            platf::set_thread_name("audio::pulseaudio");
-            auto status = pa_mainloop_run(loop, &retval);
-
-            if (status < 0) {
-              BOOST_LOG(error) << "Couldn't run pulseaudio main loop"sv;
-              return;
-            }
-          },
-          loop.get()
-        };
-
-        auto event = events->pop();
-        if (event == failed) {
+        ctx.reset(pa_context_new(pa_mainloop_get_api(loop.get()), "PLANK Host"));
+        if (!ctx || pa_context_connect(ctx.get(), nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0) {
           return -1;
         }
+        return pulse::wait(loop.get(), ctx.get(), [&] {
+          return pa_context_get_state(ctx.get()) == PA_CONTEXT_READY;
+        },
+                           [] {
+                             return false;
+                           },
+                           std::chrono::steady_clock::now() + 2s) ?
+                 0 :
+                 -1;
+      }
 
-        return 0;
+      /** @brief Complete/cancel an operation before its callback storage retires.
+       * @param op Owned PulseAudio operation; null means immediate API failure.
+       * @param alarm Callback result.
+       * @return True if the operation produced a result before its deadline.
+       */
+      template<class Alarm>
+      bool await(op_t &op, const Alarm &alarm) {
+        if (!op) {
+          return false;
+        }
+        const bool done = pulse::wait(loop.get(), ctx.get(), [&] {
+          return pa_operation_get_state(op.get()) != PA_OPERATION_RUNNING;
+        },
+                                      [] {
+                                        return false;
+                                      },
+                                      std::min(shutdown_deadline, std::chrono::steady_clock::now() + 2s));
+        if (!done || !alarm->status()) {
+          pa_operation_cancel(op.get());
+          return false;
+        }
+        return true;
       }
 
       /**
@@ -375,6 +392,7 @@ namespace platf {
        * @return PulseAudio module index for the new sink, or PA_INVALID_INDEX on failure.
        */
       int load_null(const char *name, const std::uint8_t *channel_mapping, int channels) {
+        std::lock_guard lock {operation_mutex};
         auto alarm = safe::make_alarm<int>();
 
         op_t op {
@@ -387,7 +405,9 @@ namespace platf {
           ),
         };
 
-        alarm->wait();
+        if (!await(op, alarm)) {
+          return PA_INVALID_INDEX;
+        }
         return *alarm->status();
       }
 
@@ -398,6 +418,7 @@ namespace platf {
        * @return 0 when the sink is absent or unloaded; nonzero on PulseAudio failure.
        */
       int unload_null(std::uint32_t i) {
+        std::lock_guard lock {operation_mutex};
         if (i == PA_INVALID_INDEX) {
           return 0;
         }
@@ -408,7 +429,9 @@ namespace platf {
           pa_context_unload_module(ctx.get(), i, success_cb, alarm.get())
         };
 
-        alarm->wait();
+        if (!await(op, alarm)) {
+          return -1;
+        }
 
         if (*alarm->status()) {
           BOOST_LOG(error) << "Couldn't unload null-sink with index ["sv << i << "]: "sv << pa_strerror(pa_context_errno(ctx.get()));
@@ -424,6 +447,7 @@ namespace platf {
        * @return Host and virtual sink names when the backend can report them.
        */
       std::optional<sink_t> sink_info() override {
+        std::lock_guard lock {operation_mutex};
         constexpr auto stereo = "sink-plank-stereo";
         constexpr auto surround51 = "sink-plank-surround51";
         constexpr auto surround71 = "sink-plank-surround71";
@@ -437,13 +461,13 @@ namespace platf {
 
         cb_t<pa_sink_info *> f = [&](ctx_t::pointer ctx, const pa_sink_info *sink_info, int eol) {
           if (!sink_info) {
-            if (!eol) {
+            if (eol <= 0) {
               BOOST_LOG(error) << "Couldn't get pulseaudio sink info: "sv << pa_strerror(pa_context_errno(ctx));
 
               alarm->ring(-1);
+            } else {
+              alarm->ring(0);
             }
-
-            alarm->ring(0);
             return;
           }
 
@@ -471,7 +495,9 @@ namespace platf {
           return std::nullopt;
         }
 
-        alarm->wait();
+        if (!await(op, alarm)) {
+          return std::nullopt;
+        }
 
         if (*alarm->status()) {
           return std::nullopt;
@@ -524,6 +550,7 @@ namespace platf {
        * @return PulseAudio name of the current default sink, or an empty string.
        */
       std::string get_default_sink_name() {
+        std::lock_guard lock {operation_mutex};
         std::string sink_name;
         auto alarm = safe::make_alarm<int>();
 
@@ -531,6 +558,7 @@ namespace platf {
           if (!server_info) {
             BOOST_LOG(error) << "Couldn't get pulseaudio server info: "sv << pa_strerror(pa_context_errno(ctx));
             alarm->ring(-1);
+            return;
           }
 
           if (server_info->default_sink_name) {
@@ -540,7 +568,9 @@ namespace platf {
         };
 
         op_t server_op {pa_context_get_server_info(ctx.get(), cb<pa_server_info *>, &server_f)};
-        alarm->wait();
+        if (!await(server_op, alarm)) {
+          return {};
+        }
         // No need to check status. If it failed just return default name.
         return sink_name;
       }
@@ -552,6 +582,7 @@ namespace platf {
        * @return PulseAudio monitor source name for the supplied sink, or an empty string.
        */
       std::string get_monitor_name(const std::string &sink_name) {
+        std::lock_guard lock {operation_mutex};
         std::string monitor_name;
         auto alarm = safe::make_alarm<int>();
 
@@ -561,13 +592,13 @@ namespace platf {
 
         cb_t<pa_sink_info *> sink_f = [&](ctx_t::pointer ctx, const pa_sink_info *sink_info, int eol) {
           if (!sink_info) {
-            if (!eol) {
+            if (eol <= 0) {
               BOOST_LOG(error) << "Couldn't get pulseaudio sink info for ["sv << sink_name
                                << "]: "sv << pa_strerror(pa_context_errno(ctx));
               alarm->ring(-1);
+            } else {
+              alarm->ring(0);
             }
-
-            alarm->ring(0);
             return;
           }
 
@@ -576,7 +607,9 @@ namespace platf {
 
         op_t sink_op {pa_context_get_sink_info_by_name(ctx.get(), sink_name.c_str(), cb<pa_sink_info *>, &sink_f)};
 
-        alarm->wait();
+        if (!await(sink_op, alarm)) {
+          return {};
+        }
         // No need to check status. If it failed just return default name.
         BOOST_LOG(info) << "Found default monitor by name: "sv << monitor_name;
         return monitor_name;
@@ -594,6 +627,7 @@ namespace platf {
        * @return Microphone capture object for the requested audio layout.
        */
       std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, std::uint32_t frame_size, bool continuous_audio, [[maybe_unused]] bool host_audio_enabled) override {
+        std::lock_guard lock {operation_mutex};
         // Sink choice priority:
         // 1. Config sink
         // 2. Last sink swapped to (Usually virtual in this case)
@@ -613,8 +647,7 @@ namespace platf {
       }
 
       bool is_sink_available(const std::string &sink) override {
-        BOOST_LOG(warning) << "audio_control_t::is_sink_available() unimplemented: "sv << sink;
-        return true;
+        return !get_monitor_name(sink).empty();
       }
 
       /**
@@ -624,6 +657,7 @@ namespace platf {
        * @return Status from updating sink.
        */
       int set_sink(const std::string &sink) override {
+        std::lock_guard lock {operation_mutex};
         auto alarm = safe::make_alarm<int>();
 
         BOOST_LOG(info) << "Setting default sink to: ["sv << sink << "]"sv;
@@ -641,7 +675,9 @@ namespace platf {
           return -1;
         }
 
-        alarm->wait();
+        if (!await(op, alarm)) {
+          return -1;
+        }
         if (*alarm->status()) {
           BOOST_LOG(error) << "Couldn't set default-sink ["sv << sink << "]: "sv << pa_strerror(pa_context_errno(ctx.get()));
 
@@ -654,19 +690,15 @@ namespace platf {
       }
 
       ~server_t() override {
-        unload_null(index.stereo);
-        unload_null(index.surround51);
-        unload_null(index.surround71);
-
-        if (worker.joinable()) {
+        std::lock_guard lock {operation_mutex};
+        shutdown_deadline = std::chrono::steady_clock::now() + 500ms;
+        if (ctx && pa_context_get_state(ctx.get()) == PA_CONTEXT_READY) {
+          unload_null(index.stereo);
+          unload_null(index.surround51);
+          unload_null(index.surround71);
+        }
+        if (ctx) {
           pa_context_disconnect(ctx.get());
-
-          KITTY_WHILE_LOOP(auto event = events->pop(), event != terminated && event != failed, {
-            event = events->pop();
-          })
-
-          pa_mainloop_quit(loop.get(), 0);
-          worker.join();
         }
       }
     };

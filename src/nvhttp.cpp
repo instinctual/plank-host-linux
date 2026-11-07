@@ -310,15 +310,11 @@ namespace nvhttp {
    * @return Parsed JSON object, or null on malformed input.
    */
   nlohmann::json read_auth_json(const req_https_t &request) {
-    std::ostringstream stream;
-    stream << request->content.rdbuf();
-    std::string content = stream.str();
-    if (content.size() > 64U * 1024U) {
-      if (!content.empty()) {
-        explicit_bzero(content.data(), content.size());
-      }
+    if (request->content.size() > 64U * 1024U) {
       return nullptr;
     }
+    std::string content(request->content.size(), '\0');
+    request->content.read(content.data(), static_cast<std::streamsize>(content.size()));
     auto body = nlohmann::json::parse(content, nullptr, false);
     if (!content.empty()) {
       explicit_bzero(content.data(), content.size());
@@ -1112,11 +1108,7 @@ namespace nvhttp {
     std::ostringstream data;
 
     pt::write_xml(data, tree);
-    response->write(data.str());
-
-    *response
-      << "HTTP/1.1 404 NOT FOUND\r\n"
-      << data.str();
+    response->write(SimpleWeb::StatusCode::client_error_not_found, data.str());
 
     response->close_connection_after_response = true;
   }

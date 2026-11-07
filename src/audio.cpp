@@ -183,20 +183,34 @@ namespace audio {
 #endif
     };
 
-    enum class capture_result_e { shutdown, reattach, unavailable };
+    enum class capture_result_e {
+      shutdown,
+      reattach,
+      unavailable
+    };
     auto capture_generation = [&](std::uint64_t attached_generation) {
       auto ref = get_audio_ctx_ref();
-      if (!ref || !ref->control) return capture_result_e::unavailable;
+      if (!ref || !ref->control) {
+        return capture_result_e::unavailable;
+      }
 
       // Order of priority: virtual sink, configured sink, then host sink.
       std::string *sink = &ref->sink.host;
-      if (!config::audio.sink.empty()) sink = &config::audio.sink;
+      if (!config::audio.sink.empty()) {
+        sink = &config::audio.sink;
+      }
       if (ref->sink.null && (!config.flags[config_t::HOST_AUDIO] || sink->empty())) {
         auto &null = *ref->sink.null;
         switch (stream.channelCount) {
-          case 2: sink = &null.stereo; break;
-          case 6: sink = &null.surround51; break;
-          case 8: sink = &null.surround71; break;
+          case 2:
+            sink = &null.stereo;
+            break;
+          case 6:
+            sink = &null.surround51;
+            break;
+          case 8:
+            sink = &null.surround71;
+            break;
         }
       }
 
@@ -208,10 +222,16 @@ namespace audio {
       }
 
       auto mic = ref->control->microphone(
-        stream.mapping, stream.channelCount, stream.sampleRate, frame_size,
-        continuous_audio, host_audio
+        stream.mapping,
+        stream.channelCount,
+        stream.sampleRate,
+        frame_size,
+        continuous_audio,
+        host_audio
       );
-      if (!mic) return capture_result_e::unavailable;
+      if (!mic) {
+        return capture_result_e::unavailable;
+      }
 
       auto samples = std::make_shared<sample_queue_t::element_type>(30);
       std::jthread thread {encodeThread, samples, config, channel_data};
@@ -221,14 +241,22 @@ namespace audio {
       });
 
       while (!shutdown_event->peek()) {
-        if (generation() != attached_generation) return capture_result_e::reattach;
+        if (generation() != attached_generation) {
+          return capture_result_e::reattach;
+        }
         std::vector<float> sample_buffer(samples_per_frame);
-        const auto status = mic->sample(sample_buffer);
-        if (generation() != attached_generation) return capture_result_e::reattach;
+        const auto status = mic->sample(sample_buffer, [&] {
+          return shutdown_event->peek() || generation() != attached_generation;
+        });
+        if (generation() != attached_generation) {
+          return capture_result_e::reattach;
+        }
         switch (status) {
           case platf::capture_e::ok:
             samples->raise(std::move(sample_buffer));
             break;
+          case platf::capture_e::interrupted:
+            return capture_result_e::shutdown;
           case platf::capture_e::timeout:
             break;
           case platf::capture_e::reinit:
@@ -236,14 +264,24 @@ namespace audio {
             mic.reset();
             do {
               mic = ref->control->microphone(
-                stream.mapping, stream.channelCount, stream.sampleRate, frame_size,
-                continuous_audio, host_audio
+                stream.mapping,
+                stream.channelCount,
+                stream.sampleRate,
+                frame_size,
+                continuous_audio,
+                host_audio
               );
-              if (!mic) BOOST_LOG(warning) << "Couldn't re-initialize audio input"sv;
+              if (!mic) {
+                BOOST_LOG(warning) << "Couldn't re-initialize audio input"sv;
+              }
             } while (!mic && generation() == attached_generation &&
                      !shutdown_event->view(5s));
-            if (generation() != attached_generation) return capture_result_e::reattach;
-            if (!mic) return capture_result_e::shutdown;
+            if (generation() != attached_generation) {
+              return capture_result_e::reattach;
+            }
+            if (!mic) {
+              return capture_result_e::shutdown;
+            }
             break;
           default:
             return capture_result_e::unavailable;
@@ -256,7 +294,9 @@ namespace audio {
     while (!shutdown_event->peek()) {
       const auto attached_generation = generation();
       const auto result = capture_generation(attached_generation);
-      if (result == capture_result_e::shutdown) return;
+      if (result == capture_result_e::shutdown) {
+        return;
+      }
       if (result == capture_result_e::reattach) {
         BOOST_LOG(info) << "Rebinding audio to desktop generation "sv << generation();
         continue;
@@ -278,7 +318,8 @@ namespace audio {
     auto &control = controls[generation];
     if (!control) {
       control = std::make_unique<safe::shared_t<audio_ctx_t>>(
-        start_audio_control, stop_audio_control
+        start_audio_control,
+        stop_audio_control
       );
     }
     return control->ref();

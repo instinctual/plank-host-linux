@@ -447,9 +447,10 @@ namespace platf {
      * @brief Deliver a captured audio sample to Sunshine's audio pipeline.
      *
      * @param frame_buffer Destination for captured floating-point PCM samples.
+     * @param stop Owner cancellation predicate; capture must observe it promptly.
      * @return Capture status reported to the streaming pipeline.
      */
-    virtual capture_e sample(std::vector<float> &frame_buffer) = 0;
+    virtual capture_e sample(std::vector<float> &frame_buffer, const std::function<bool()> &stop) = 0;
 
     virtual ~mic_t() = default;
   };
@@ -516,8 +517,6 @@ namespace platf {
    * @brief Owning pointer for a platform input backend.
    */
   using input_t = util::safe_ptr<input_raw_t, &freeInput>;
-
-  std::filesystem::path appdata();
 
   /**
    * @brief Convert a socket address to a printable IP address.

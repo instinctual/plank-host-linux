@@ -264,25 +264,6 @@ namespace NVENC_NAMESPACE {
     );
 
     /**
-     * @brief Configure AV1 codec options.
-     *
-     * @param enc_config Encoder configuration to update.
-     * @param config NVENC encoder configuration.
-     * @param client_config Stream configuration requested by the client.
-     * @param colorspace NVENC colorspace metadata.
-     * @param buffer_format Selected NVENC input format.
-     * @param encode_guid Selected codec GUID.
-     */
-    void configure_av1(
-      NV_ENC_CONFIG &enc_config,
-      const ::nvenc::nvenc_config &config,
-      const video::config_t &client_config,
-      const nvenc_colorspace_t &colorspace,
-      NV_ENC_BUFFER_FORMAT buffer_format,
-      const GUID &encode_guid
-    );
-
-    /**
      * @brief Configure codec-specific encoder options.
      *
      * @param enc_config Encoder configuration to update.

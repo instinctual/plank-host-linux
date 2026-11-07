@@ -383,25 +383,6 @@ namespace util {
   }
 
   /**
-   * @brief Append the raw bytes of a trivially-copyable structure to a byte buffer.
-   *
-   * @param buf Destination buffer used for protocol serialization.
-   * @param _struct Structure instance whose in-memory bytes should be appended.
-   */
-  template<class T>
-  void append_struct(std::vector<uint8_t> &buf, const T &_struct) {
-    constexpr size_t data_len = sizeof(_struct);
-
-    buf.reserve(data_len);
-
-    auto *data = (uint8_t *) &_struct;
-
-    for (size_t x = 0; x < data_len; ++x) {
-      buf.push_back(data[x]);
-    }
-  }
-
-  /**
    * @brief Formatter that exposes a value's bytes as hexadecimal text.
    */
   template<class T>
@@ -543,17 +524,6 @@ namespace util {
   }
 
   /**
-   * @brief Format a value as hexadecimal text for logging.
-   *
-   * @param value Value whose bytes should be logged in hexadecimal.
-   * @return Hexadecimal string representation of the input object.
-   */
-  template<typename T>
-  std::string log_hex(const T &value) {
-    return "0x" + Hex<T>(value, false).to_string();
-  }
-
-  /**
    * @brief Convert a value to a vector of hexadecimal bytes.
    *
    * @param begin Iterator or pointer marking the start of the input range.
@@ -676,65 +646,6 @@ namespace util {
     }
 
     return *reinterpret_cast<T *>(buf);
-  }
-
-  /**
-   * @brief Convert from hex vec.
-   *
-   * @param hex Hexadecimal text to decode.
-   * @param rev Whether bytes should be emitted in reverse order.
-   * @return Value converted from hex vec.
-   */
-  inline std::string from_hex_vec(const std::string &hex, bool rev = false) {
-    std::string buf;
-
-    static char constexpr shift_bit = 'a' - 'A';
-    auto is_convertable = [](char ch) -> bool {
-      if (isdigit(ch)) {
-        return true;
-      }
-
-      ch |= shift_bit;
-
-      if ('a' > ch || ch > 'z') {
-        return false;
-      }
-
-      return true;
-    };
-
-    auto buf_size = std::count_if(std::begin(hex), std::end(hex), is_convertable) / 2;
-    buf.resize(buf_size);
-
-    const char *data = hex.data() + hex.size() - 1;
-
-    auto convert = [](char ch) -> std::uint8_t {
-      if (ch >= '0' && ch <= '9') {
-        return (std::uint8_t) ch - '0';
-      }
-
-      return (std::uint8_t) (ch | (char) 32) - 'a' + (char) 10;
-    };
-
-    for (auto &el : buf) {
-      while (!is_convertable(*data)) {
-        --data;
-      }
-      std::uint8_t ch_r = convert(*data--);
-
-      while (!is_convertable(*data)) {
-        --data;
-      }
-      std::uint8_t ch_l = convert(*data--);
-
-      el = (ch_l << 4) | ch_r;
-    }
-
-    if (rev) {
-      std::reverse(std::begin(buf), std::end(buf));
-    }
-
-    return buf;
   }
 
   /**

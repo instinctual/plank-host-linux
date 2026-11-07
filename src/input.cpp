@@ -145,7 +145,7 @@ namespace input {
   // barrier against a new connection attaching while cleanup is in progress.
   static std::mutex input_state_mutex;
   static std::unordered_map<key_press_id_t, bool> key_press {};
-  static std::array<std::uint8_t, 5> mouse_press {};
+  static std::array<std::uint8_t, BUTTON_X2 + 1> mouse_press {};
 
   static platf::input_t platf_input;
 
@@ -990,7 +990,7 @@ namespace input {
   void reset_keyboard_keys() {
     for (auto &[key, pressed] : key_press) {
       if (pressed) {
-        platf::keyboard_update(platf_input, vk_from_kpid(key) & 0x00FF, true, flags_from_kpid(key));
+        platf::keyboard_update(platf_input, map_keycode(vk_from_kpid(key) & 0x00FF), true, flags_from_kpid(key));
         pressed = false;
       }
     }
@@ -1008,8 +1008,15 @@ namespace input {
     }
 
     task_pool.cancel(key_press_repeat_id);
+    key_press_repeat_id = {};
     reset_mouse_buttons();
     reset_keyboard_keys();
+    key_press.clear();
+    input->shortcutFlags = 0;
+    input->left_alt_pressed = false;
+    input->right_alt_pressed = false;
+    input->accumulated_vscroll_delta = 0;
+    input->accumulated_hscroll_delta = 0;
     platf::pen_input_t pen {};
     pen.eventType = LI_TOUCH_EVENT_CANCEL_ALL;
     pen.toolType = LI_TOOL_TYPE_UNKNOWN;

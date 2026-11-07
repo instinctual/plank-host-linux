@@ -72,8 +72,6 @@ namespace {
         return "H.264 ";
       case 1:
         return "HEVC ";
-      case 2:
-        return "AV1 ";
       default:
         return " ";
     }
@@ -408,44 +406,6 @@ namespace NVENC_NAMESPACE {
     configure_h264_hevc_metadata(format_config, client_config, colorspace, buffer_format, encode_guid);
   }
 
-  void nvenc_base::configure_av1(
-    NV_ENC_CONFIG &enc_config,
-    const ::nvenc::nvenc_config &config,
-    const video::config_t &client_config,
-    const nvenc_colorspace_t &colorspace,
-    NV_ENC_BUFFER_FORMAT buffer_format,
-    const GUID &encode_guid
-  ) {
-    auto &format_config = enc_config.encodeCodecConfig.av1Config;
-    format_config.repeatSeqHdr = 1;
-    format_config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
-    if (buffer_is_yuv444(buffer_format)) {
-      format_config.chromaFormatIDC = 3;
-    }
-    format_config.enableBitstreamPadding = config.insert_filler_data;
-    if (buffer_is_10bit(buffer_format)) {
-      format_config.inputBitDepth = NV_ENC_BIT_DEPTH_10;
-      format_config.outputBitDepth = NV_ENC_BIT_DEPTH_10;
-    }
-    format_config.colorPrimaries = colorspace.primaries;
-    format_config.transferCharacteristics = colorspace.tranfer_function;
-    format_config.matrixCoefficients = colorspace.matrix;
-    format_config.colorRange = colorspace.full_range;
-    format_config.chromaSamplePosition = buffer_is_yuv444(buffer_format) ? 0 : 1;
-    configure_reference_frames(format_config.maxNumRefFramesInDPB, format_config.numFwdRefs, 8, client_config.numRefFrames, encode_guid);
-
-    if (config.enable_min_qp) {
-      enc_config.rcParams.enableMinQP = 1;
-      enc_config.rcParams.minQP.qpInterP = config.min_qp_av1;
-      enc_config.rcParams.minQP.qpIntra = config.min_qp_av1;
-    }
-    if (client_config.slicesPerFrame > 1) {
-      // NVENC supports power-of-two tile counts, biased toward rows.
-      format_config.numTileRows = std::pow(2, std::ceil(std::log2(client_config.slicesPerFrame) / 2));
-      format_config.numTileColumns = std::pow(2, std::floor(std::log2(client_config.slicesPerFrame) / 2));
-    }
-  }
-
   void nvenc_base::configure_codec(
     NV_ENC_CONFIG &enc_config,
     const ::nvenc::nvenc_config &config,
@@ -460,9 +420,6 @@ namespace NVENC_NAMESPACE {
         break;
       case 1:
         configure_hevc(enc_config, config, client_config, colorspace, buffer_format, encode_guid);
-        break;
-      case 2:
-        configure_av1(enc_config, config, client_config, colorspace, buffer_format, encode_guid);
         break;
     }
   }
@@ -595,9 +552,6 @@ namespace NVENC_NAMESPACE {
         break;
       case 1:
         init_params.encodeGUID = NV_ENC_CODEC_HEVC_GUID;
-        break;
-      case 2:
-        init_params.encodeGUID = NV_ENC_CODEC_AV1_GUID;
         break;
       default:
         BOOST_LOG(error) << "NvEnc: unknown video format " << client_config.videoFormat;

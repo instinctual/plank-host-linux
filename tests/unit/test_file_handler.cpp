@@ -28,7 +28,7 @@ struct FileHandlerMakeDirectoryTest: BaseTest, testing::WithParamInterface<std::
 
 TEST_P(FileHandlerMakeDirectoryTest, Run) {
   auto [input, expected, remove] = GetParam();
-  const std::string test_dir = platf::appdata().string() + "/tests/path/";
+  const std::string test_dir = std::filesystem::temp_directory_path().string() + "/plank-file-handler-tests/path/";
   input = test_dir + input;
 
   EXPECT_EQ(file_handler::make_directory(input), expected);
@@ -85,8 +85,10 @@ TEST_P(FileHandlerTests, WriteFileTest) {
     file_handler::write_file(
       fileName.c_str(),
       content,
-      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write),
-    0);
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+    ),
+    0
+  );
 }
 
 TEST_P(FileHandlerTests, ReadFileTest) {

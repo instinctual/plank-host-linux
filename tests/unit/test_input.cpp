@@ -404,8 +404,8 @@ TEST_F(InputRetainedSessionTest, EmptyDisconnectDoesNotSynthesizeButtonEvents) {
 TEST_F(InputRetainedSessionTest, DisconnectReleasesEachHeldMouseButtonOnce) {
   std::uint64_t connection_id = 0;
   auto session = allocate("held-buttons", connection_id);
-  // Exercise left, middle and right separately so each release is observable.
-  for (std::uint8_t button = 1; button <= 3; ++button) {
+  // Exercise every supported button, including both side buttons.
+  for (std::uint8_t button = 1; button <= BUTTON_X2; ++button) {
     SCOPED_TRACE(button);
     const auto before_press = mouse->submit_count();
     input::testing::handle_mouse_button(session, button, false);
@@ -616,4 +616,29 @@ TEST_F(InputRetainedSessionTest, NormalizedPenReleasesRetainedRawTabletEndpoints
 
   EXPECT_TRUE(input::testing::normalized_pen_enabled(session));
   EXPECT_EQ(input::testing::raw_hid_generation(session), 0);
+}
+
+TEST_F(InputRetainedSessionTest, DisconnectReleasesMappedKey) {
+  std::uint64_t lease = 0;
+  auto session = allocate("mapped-key-release", lease);
+  auto saved = config::input.keybindings;
+  config::input.keybindings[0x41] = 0x42;
+  input::testing::handle_keyboard(session, 0x41, false);
+  EXPECT_EQ(input::testing::last_keyboard_code(), 0x42);
+  input::reset(session, lease);
+  EXPECT_EQ(input::testing::last_keyboard_code(), 0x42);
+  config::input.keybindings = std::move(saved);
+}
+
+TEST_F(InputRetainedSessionTest, ReconnectDoesNotRetainTheOldModifierChord) {
+  std::uint64_t lease = 0;
+  auto session = allocate("modifier-reset", lease);
+  for (const auto key : {0xa0, 0xa2, 0xa4}) {
+    input::testing::handle_keyboard(session, key, false);
+  }
+  input::reset(session, lease);
+  auto resumed = allocate("modifier-reset", lease);
+  // Stale Ctrl+Alt+Shift bookkeeping would consume F1 as a Host shortcut.
+  input::testing::handle_keyboard(resumed, 0x70, false);
+  EXPECT_EQ(input::testing::last_keyboard_code(), 0x70);
 }

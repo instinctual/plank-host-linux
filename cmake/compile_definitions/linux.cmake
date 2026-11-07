@@ -151,4 +151,4 @@ list(APPEND PLATFORM_TARGET_FILES
 list(APPEND PLATFORM_LIBRARIES
         dl
         pulse
-        pulse-simple)
+        pulse)

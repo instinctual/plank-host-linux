@@ -6,6 +6,7 @@
 #include "src/auth/web_auth.h"
 #include "src/nvhttp.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <future>
 #include <gtest/gtest.h>
@@ -191,4 +192,24 @@ TEST_F(AuthHttps, StatusWorksWhilePAMStallsAndClientAbortCancelsItsRequest) {
   EXPECT_EQ(result.get().state, auth::step_t::state_e::denied);
   std::lock_guard lock {state->mutex};
   EXPECT_TRUE(state->cancelled);
+}
+
+TEST_F(AuthHttps, RejectsOversizedBodyBeforeDispatchOrBodyTransfer) {
+  std::atomic_bool dispatched = false;
+  server->resource["^/oversized$"]["POST"] = [&](auto response, auto) {
+    dispatched = true;
+    response->write("unexpected");
+  };
+  client_t peer {start()};
+  const std::string header = "POST /oversized HTTP/1.1\r\nHost: test.invalid\r\nContent-Length: 4294967295\r\n\r\n";
+  boost::asio::write(peer.socket, boost::asio::buffer(header));
+  // No body is sent. The reader must reject/close from the header alone.
+  const auto began = std::chrono::steady_clock::now();
+  try {
+    EXPECT_NE(peer.header().find("413"), std::string::npos);
+  } catch (const boost::system::system_error &) {
+    // Simple-Web-Server may close on message_size instead of sending a 413.
+  }
+  EXPECT_FALSE(dispatched);
+  EXPECT_LT(std::chrono::steady_clock::now() - began, 1s);
 }
