@@ -11,7 +11,6 @@
 #include <charconv>
 #include <cmath>
 #include <cstring>
-#include <list>
 #include <thread>
 #include <utility>
 
@@ -30,6 +29,7 @@ extern "C" {
 }
 
 // local includes
+#include "capture_image_pool.h"
 #include "cbs.h"
 #include "config.h"
 #include "frame_timing.h"
@@ -719,99 +719,17 @@ namespace video {
     }
     display_wp = disp;
 
-    constexpr auto capture_buffer_size = 12;
-    std::list<std::shared_ptr<platf::img_t>> imgs(capture_buffer_size);
-
-    std::vector<std::optional<std::chrono::steady_clock::time_point>> imgs_used_timestamps;
-    const std::chrono::seconds trim_timeot = 3s;
-    auto trim_imgs = [&]() {
-      // count allocated and used within current pool
-      size_t allocated_count = 0;
-      size_t used_count = 0;
-      for (const auto &img : imgs) {
-        if (img) {
-          allocated_count += 1;
-          if (img.use_count() > 1) {
-            used_count += 1;
-          }
-        }
-      }
-
-      // remember the timestamp of currently used count
-      const auto now = std::chrono::steady_clock::now();
-      if (imgs_used_timestamps.size() <= used_count) {
-        imgs_used_timestamps.resize(used_count + 1);
-      }
-      imgs_used_timestamps[used_count] = now;
-
-      // decide whether to trim allocated unused above the currently used count
-      // based on last used timestamp and universal timeout
-      size_t trim_target = used_count;
-      for (size_t i = used_count; i < imgs_used_timestamps.size(); i++) {
-        if (imgs_used_timestamps[i] && now - *imgs_used_timestamps[i] < trim_timeot) {
-          trim_target = i;
-        }
-      }
-
-      // trim allocated unused above the newly decided trim target
-      if (allocated_count > trim_target) {
-        size_t to_trim = allocated_count - trim_target;
-        // prioritize trimming least recently used
-        for (auto it = imgs.rbegin(); it != imgs.rend(); it++) {
-          auto &img = *it;
-          if (img && img.use_count() == 1) {
-            img.reset();
-            to_trim -= 1;
-            if (to_trim == 0) {
-              break;
-            }
-          }
-        }
-        // forget timestamps that no longer relevant
-        imgs_used_timestamps.resize(trim_target + 1);
-      }
-    };
-
+    capture_image_pool_t<platf::img_t> images {disp->capture_pool_retention_count()};
     auto pull_free_image_callback = [&](std::shared_ptr<platf::img_t> &img_out) -> bool {
       img_out.reset();
       while (capture_ctx_queue->running()) {
-        // pick first allocated but unused
-        for (auto it = imgs.begin(); it != imgs.end(); it++) {
-          if (*it && it->use_count() == 1) {
-            img_out = *it;
-            if (it != imgs.begin()) {
-              // move image to the front of the list to prioritize its reusal
-              imgs.erase(it);
-              imgs.push_front(img_out);
-            }
-            break;
-          }
-        }
-        // otherwise pick first unallocated
-        if (!img_out) {
-          for (auto it = imgs.begin(); it != imgs.end(); it++) {
-            if (!*it) {
-              // allocate image
-              *it = disp->alloc_img();
-              img_out = *it;
-              if (it != imgs.begin()) {
-                // move image to the front of the list to prioritize its reusal
-                imgs.erase(it);
-                imgs.push_front(img_out);
-              }
-              break;
-            }
-          }
-        }
+        img_out = images.acquire([&]() { return disp->alloc_img(); });
         if (img_out) {
-          // trim allocated but unused portion of the pool based on timeouts
-          trim_imgs();
           img_out->frame_timestamp.reset();
           return true;
-        } else {
-          // sleep and retry if image pool is full
-          std::this_thread::sleep_for(1ms);
         }
+        // Existing bounded backpressure and cancellation behavior are unchanged.
+        std::this_thread::sleep_for(1ms);
       }
       return false;
     };
@@ -861,6 +779,14 @@ namespace video {
       // composited into the captured video frame.
       bool capture_cursor = false;
       auto status = disp->capture(push_captured_image_callback, pull_free_image_callback, &capture_cursor);
+      if (images.retention() != 0) {
+        BOOST_LOG(info) << "Native X11 capture pool: allocations="sv << images.allocation_count
+                        << " retired="sv << images.retired_count
+                        << " peak_buffers="sv << images.peak_allocated
+                        << " retained_limit="sv << images.retention()
+                        << " unavailable_polls="sv << images.unavailable_count
+                        << " allocation_failures="sv << images.allocation_failures;
+      }
 
 #ifdef __linux__
       if (status == platf::capture_e::error &&
@@ -899,9 +825,7 @@ namespace video {
             reinit_event.raise(true);
 
             // Some classes of images contain references to the display --> display won't delete unless img is deleted
-            for (auto &img : imgs) {
-              img.reset();
-            }
+            images.clear();
 
             // display_wp is modified in this thread only
             // Wait for the other shared_ptr's of display to be destroyed.
@@ -950,6 +874,7 @@ namespace video {
             }
 
             display_wp = disp;
+            images.set_retention(disp->capture_pool_retention_count());
 
             reinit_event.reset();
             continue;

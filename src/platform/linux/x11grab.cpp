@@ -31,6 +31,7 @@
 #include "cuda.h"
 #include "cursor_image.h"
 #include "misc.h"
+#include "src/capture_image_pool.h"
 #include "src/config.h"
 #include "src/frame_timing.h"
 #include "src/globals.h"
@@ -886,6 +887,7 @@ namespace platf {
       video::log_frame_timing("native10_geometry_batch_wait", geometry_wait);
       video::log_frame_timing("native10_xshm_reply_wait", image_wait);
       video::log_frame_timing("native10_capture_total", capture_total);
+      video::log_frame_timing("native10_pool_acquire", pool_acquire);
       if (xdisplay && compositor_keepalive != 0) {
         x11::DestroyWindow(xdisplay.get(), compositor_keepalive);
         compositor_keepalive = 0;
@@ -1077,9 +1079,13 @@ namespace platf {
 
     x11::capture_geometry_t capture_geometry;  ///< Event-backed root/overlay geometry validity.
 
-    capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out) {
+    capture_e snapshot(const pull_free_image_cb_t &pull_free_image_cb, std::shared_ptr<platf::img_t> &img_out, bool record_timing = true) {
+      const auto started = std::chrono::steady_clock::now();
       if (!pull_free_image_cb(img_out)) {
         return capture_e::interrupted;
+      }
+      if (record_timing) {
+        pool_acquire.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started).count());
       }
       auto *img = dynamic_cast<native10_img_t *>(img_out.get());
       if (!img || img->connection != connection) {
@@ -1098,13 +1104,21 @@ namespace platf {
         return capture_e::reinit;
       }
       img->frame_timestamp = frame_timestamp;
-      geometry_wait.push_back(result.geometry_wait_us);
-      image_wait.push_back(result.image_wait_us);
-      capture_total.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - frame_timestamp).count());
+      if (record_timing) {
+        geometry_wait.push_back(result.geometry_wait_us);
+        image_wait.push_back(result.image_wait_us);
+        capture_total.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started).count());
+      }
       return capture_e::ok;
     }
 
+    /** @brief Keep acquired Native10 storage warm within a 256 MiB retention budget. */
+    std::size_t capture_pool_retention_count() const override {
+      return video::capture_image_pool_t<img_t>::retention_for_bytes(frame_size(), 256U * 1024U * 1024U);
+    }
+
     std::shared_ptr<img_t> alloc_img() override {
+      const auto started = std::chrono::steady_clock::now();
       if (!connection || !connection->connection) {
         return nullptr;
       }
@@ -1136,10 +1150,12 @@ namespace platf {
         return nullptr;
       }
       img->data = static_cast<std::uint8_t *>(img->mapping);
+      double registration_us = 0;
       if (pin_upload) {
+        const auto registration_started = std::chrono::steady_clock::now();
         img->upload_registration = cuda::register_host_memory(img->mapping, frame_size());
-        BOOST_LOG(info) << "Native X11 SHM upload buffer: bytes="sv << frame_size()
-                        << " cuda_pinned="sv << static_cast<bool>(img->upload_registration);
+        registration_us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - registration_started).count();
+        img->capture_pool_preferred = static_cast<bool>(img->upload_registration);
       }
       {
         std::lock_guard lock {connection->mutex};
@@ -1166,6 +1182,10 @@ namespace platf {
         return nullptr;
       }
       img->marked_for_removal = true;
+      BOOST_LOG(info) << "Native X11 SHM buffer: bytes="sv << frame_size()
+                      << " cuda_pinned="sv << static_cast<bool>(img->upload_registration)
+                      << " allocation_ms="sv << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count()
+                      << " registration_ms="sv << registration_us / 1000.0;
       return img;
     }
 
@@ -1178,7 +1198,9 @@ namespace platf {
         return true;
       };
       std::shared_ptr<platf::img_t> img_out;
-      return snapshot(pull_dummy_img_callback, img_out) == capture_e::ok ? 0 : -1;
+      // The encoder initializes its dummy image concurrently with capture.
+      // Stage statistics are capture-thread-owned, not shared between threads.
+      return snapshot(pull_dummy_img_callback, img_out, false) == capture_e::ok ? 0 : -1;
     }
 
     std::unique_ptr<avcodec_encode_device_t> make_avcodec_software_encode_device(
@@ -1208,7 +1230,8 @@ namespace platf {
 
     video::timing_samples_t geometry_wait;  ///< Request dispatch and geometry-reply wait.
     video::timing_samples_t image_wait;  ///< Remaining SHM reply wait.
-    video::timing_samples_t capture_total;  ///< Complete checked capture duration.
+    video::timing_samples_t capture_total;  ///< Pool acquisition plus complete checked capture duration.
+    video::timing_samples_t pool_acquire;  ///< Reuse/allocation, trimming, and pool-backpressure wait.
     bool pin_upload = false;  ///< Pin only the NVENC path; x264 stays in system memory.
     Window overlay_window {};  ///< Depth-30 XComposite overlay being captured.
     Window compositor_keepalive {};  ///< Transparent window preventing unredirect.

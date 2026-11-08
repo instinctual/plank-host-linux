@@ -229,6 +229,7 @@ namespace platf {
     std::int32_t height {};  ///< Image height in pixels.
     std::int32_t pixel_pitch {};  ///< Bytes per pixel in the image buffer.
     std::int32_t row_pitch {};  ///< Bytes between consecutive image rows.
+    bool capture_pool_preferred {false};  ///< Immutable hint to preserve costly registered buffers during idle trimming.
 
     std::optional<std::chrono::steady_clock::time_point> frame_timestamp;  ///< Capture timestamp associated with the frame.
 
@@ -380,6 +381,14 @@ namespace platf {
      * @return Allocated img object, or null when unavailable.
      */
     virtual std::shared_ptr<img_t> alloc_img() = 0;
+
+    /**
+     * @brief Number of lazily allocated images to retain across quiet capture periods.
+     * @return Zero for normal idle trimming; the pool clamps other values to its capacity.
+     */
+    virtual std::size_t capture_pool_retention_count() const {
+      return 0;
+    }
 
     /**
      * @brief Populate a fallback image when real capture data is unavailable.
