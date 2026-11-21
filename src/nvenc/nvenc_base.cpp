@@ -254,7 +254,7 @@ namespace NVENC_NAMESPACE {
     enc_config.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR;
     enc_config.rcParams.zeroReorderDelay = 1;
     enc_config.rcParams.enableLookahead = 0;
-    enc_config.rcParams.lowDelayKeyFrameScale = 1;
+    enc_config.rcParams.lowDelayKeyFrameScale = 2;
 
     using enum ::nvenc::nvenc_two_pass;
     if (config.two_pass == quarter_resolution) {

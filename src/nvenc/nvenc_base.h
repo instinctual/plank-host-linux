@@ -175,7 +175,7 @@ namespace NVENC_NAMESPACE {
     ) const;
 
     /**
-     * @brief Configure rate control and VBV options.
+     * @brief Configure low-latency CBR with a 2:1 I-to-P bit ratio for single-frame VBV.
      *
      * @param enc_config Encoder configuration to update.
      * @param config NVENC encoder configuration.
